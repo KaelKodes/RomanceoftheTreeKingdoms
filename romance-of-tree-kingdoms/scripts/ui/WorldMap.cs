@@ -7,25 +7,13 @@ public partial class WorldMap : Control
 {
 	// Hardcoded coordinates for the "Hebei" prototype map
 	// In a full game, these would be in the DB or a separate JSON layout file.
-	private Dictionary<string, Vector2> _cityPositions = new Dictionary<string, Vector2>()
-	{
-		{ "Sun Capital", new Vector2(600, 300) },
-		{ "Ironhold", new Vector2(600, 100) },
-		{ "Eldershade", new Vector2(600, 500) },
+	[Export] public Control CityContainer { get; set; }
+	[Export] public GameHUD HUD { get; set; }
+	[Export] public CityMenu CityMenuDialog { get; set; }
+	[Export] public OfficerCard OfficerCardDialog { get; set; }
 
-		{ "Tiger Gate", new Vector2(600, 200) },
-		{ "River Port", new Vector2(700, 400) },
-		{ "Twin Peaks", new Vector2(500, 150) },
-
-		{ "Central Plains", new Vector2(400, 300) },
-		{ "West Hills", new Vector2(250, 300) },
-		{ "Eastern Bay", new Vector2(900, 300) },
-		{ "Mistwood", new Vector2(500, 450) },
-		{ "South Fields", new Vector2(700, 550) } // Added South Fields
-	};
-
-	// Hardcoded coordinates for the "Hebei" prototype map
-	// ... (Dictionary)
+	// Keep track of buttons to update them later
+	private Dictionary<string, Button> _cityButtons = new Dictionary<string, Button>();
 
 	private class RouteData { public string From; public string To; public string Type; }
 	private class CityData { public string Name; public string FactionColor; public bool HasPlayer; public bool IsContested; }
@@ -33,31 +21,67 @@ public partial class WorldMap : Control
 	public override void _Draw()
 	{
 		// 1. Draw Routes (Lines)
+		// 1. Draw Routes (Lines)
+		// We need button positions now. Ensure they are initialized.
+		if (_cityButtons.Count == 0 && CityContainer != null) InitCityNodes();
+
 		var routes = GetRoutesFromDB();
 		foreach (var r in routes)
 		{
-			if (_cityPositions.ContainsKey(r.From) && _cityPositions.ContainsKey(r.To))
+			if (_cityButtons.ContainsKey(r.From) && _cityButtons.ContainsKey(r.To))
 			{
-				DrawLine(_cityPositions[r.From], _cityPositions[r.To], Colors.Gray, 5.0f);
+				var btnFrom = _cityButtons[r.From];
+				var btnTo = _cityButtons[r.To];
+
+				// Use GlobalPosition converted to Local to handle container offsets/nesting
+				// Use GlobalPosition relative to this control to handle offsets
+				var start = btnFrom.GlobalPosition - GlobalPosition + btnFrom.Size / 2;
+				var end = btnTo.GlobalPosition - GlobalPosition + btnTo.Size / 2;
+
+				DrawLine(start, end, Colors.Gray, 5.0f);
 			}
 		}
 	}
 
 	// Keep track of buttons to update them later
-	private Dictionary<string, Button> _cityButtons = new Dictionary<string, Button>();
+
+
+	public override void _GuiInput(InputEvent @event)
+	{
+		if (@event is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+		{
+			// If background is clicked, hide menu
+			if (CityMenuDialog != null && CityMenuDialog.Visible)
+			{
+				CityMenuDialog.Hide();
+				// Optionally emit InteractionEnded just in case
+				// CityMenuDialog.EmitSignal(CityMenu.SignalName.InteractionEnded);
+				UpdateCityVisuals(); // Refresh state
+			}
+		}
+	}
 
 	public override void _Ready()
 	{
-		// 1. Load HUD
-		var hudScene = GD.Load<PackedScene>("res://scenes/GameHUD.tscn");
-		if (hudScene != null)
+		// 1. HUD is in scene
+		if (HUD == null) GD.PrintErr("HUD not linked in WorldMap!");
+
+		// 2. Wire up Dialogs
+		// 2. Wire up Dialogs
+		if (CityMenuDialog != null)
 		{
-			var hud = hudScene.Instantiate();
-			AddChild(hud);
+			CityMenuDialog.Hide(); // Ensure hidden on start
+			CityMenuDialog.OfficerSelected += ShowOfficerCard;
+			CityMenuDialog.InteractionEnded += OnMenuClosed;
 		}
 
-		// 2. Draw Cities (Initial)
-		DrawCityNodes();
+		if (OfficerCardDialog != null)
+		{
+			OfficerCardDialog.Hide();
+		}
+
+		// 2. Init Cities from Scene
+		InitCityNodes();
 
 		// 3. Listen for updates
 		// 3. Listen for updates
@@ -135,35 +159,32 @@ public partial class WorldMap : Control
 		confirmation.PopupCentered();
 	}
 
-	private void DrawCityNodes()
+	private void InitCityNodes()
 	{
-		var cities = GetCitiesFromDB();
+		if (CityContainer == null) return;
+		_cityButtons.Clear();
 
-		foreach (var c in cities)
+		foreach (var node in CityContainer.GetChildren())
 		{
-			if (!_cityPositions.ContainsKey(c.Name)) continue;
-
-			// Create a simple Button for the city
-			Button btn = new Button();
-			btn.Text = c.Name;
-			btn.Position = _cityPositions[c.Name] - new Vector2(40, 20); // Centerish
-			btn.TooltipText = c.HasPlayer ? "You are here!" : "";
-
-			// Color code by faction
-			if (c.FactionColor != null && c.FactionColor.StartsWith("#"))
+			if (node is Button btn)
 			{
-				btn.Modulate = new Color(c.FactionColor);
+				string key = btn.Text; // Use text as key because Node Name might vary
+				_cityButtons[key] = btn;
+
+				// Connect signal (check if already connected to avoid dupes if re-run)
+				if (!btn.IsConnected(Button.SignalName.Pressed, new Callable(this, nameof(OnCityPressedWrapper))))
+				{
+					// We need a wrapper to pass the name, or just use lambda but lambda is tricky with unregistering.
+					// Simple Lambda:
+					btn.Pressed += () => OnCityPressed(key);
+				}
 			}
-
-			// Connect signal
-			btn.Pressed += () => OnCityPressed(c.Name);
-
-			AddChild(btn);
-			_cityButtons[c.Name] = btn; // Store reference
 		}
 
-		UpdateCityVisuals(); // Apply player tags
+		UpdateCityVisuals(); // Apply DB data
 	}
+
+	private void OnCityPressedWrapper() { } // Dummy for signal check if needed, but lambda above is fine for this scope.
 
 	private List<CityData> GetCitiesFromDB()
 	{
@@ -239,25 +260,23 @@ public partial class WorldMap : Control
 
 	private void OpenCityMenu(string cityName)
 	{
-		// Load the CityMenu Scene
-		// Note: You must check the path matches your actual scene file
-		var scene = GD.Load<PackedScene>("res://scenes/CityMenu.tscn");
-		if (scene == null)
-		{
-			GD.PrintErr("Could not find res://scenes/CityMenu.tscn!");
-			return;
-		}
+		if (CityMenuDialog == null) return;
 
-		var menu = scene.Instantiate() as CityMenu;
-		if (menu != null)
-		{
-			menu.Init(cityName);
+		CityMenuDialog.Init(cityName);
+		CityMenuDialog.Show();
+		// Position centering is handled by Anchors in scene now
+	}
 
-			// Center it on screen (approximate, usually UI logic handles this via anchors)
-			menu.Position = new Vector2(400, 200);
+	private void ShowOfficerCard(int officerId)
+	{
+		if (OfficerCardDialog == null) return;
+		OfficerCardDialog.Init(officerId);
+		OfficerCardDialog.Show();
+	}
 
-			AddChild(menu);
-		}
+	private void OnMenuClosed()
+	{
+		UpdateCityVisuals();
 	}
 
 	private List<RouteData> GetRoutesFromDB()

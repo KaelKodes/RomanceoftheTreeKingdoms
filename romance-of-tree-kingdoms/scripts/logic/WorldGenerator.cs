@@ -6,7 +6,7 @@ using System.Linq;
 
 public partial class WorldGenerator : Node
 {
-    private string _dbPath;
+    // private string _dbPath; // Removed
 
     private string[] _names = new string[] {
         "Cao Cao", "Liu Bei", "Sun Quan", "Lu Bu", "Guan Yu", "Zhang Fei", "Zhao Yun", "Zhuge Liang",
@@ -20,14 +20,14 @@ public partial class WorldGenerator : Node
 
     public override void _Ready()
     {
-        _dbPath = System.IO.Path.Combine(ProjectSettings.GlobalizePath("res://"), "../tree_kingdoms.db");
+        // _dbPath = System.IO.Path.Combine(ProjectSettings.GlobalizePath("res://"), "../tree_kingdoms.db");
     }
 
     public void GenerateNewWorld()
     {
         GD.Print("[WorldGenerator] Generating New World...");
 
-        using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        using (var conn = DatabaseHelper.GetConnection())
         {
             conn.Open();
             using (var transaction = conn.BeginTransaction())
@@ -62,7 +62,6 @@ public partial class WorldGenerator : Node
                     }
 
                     // 3. Generate 25 Officers
-                    // Only need 25 random names.
                     var rng = new Random();
                     var officerIds = new List<long>();
 
@@ -73,15 +72,16 @@ public partial class WorldGenerator : Node
                     {
                         var cmd = conn.CreateCommand();
                         cmd.CommandText = @"
-                            INSERT INTO officers (name, leadership, strategy, combat, politics, is_player, rank, reputation) 
-                            VALUES ($name, $lea, $str, $com, $pol, 0, 'Free', 0);
+                            INSERT INTO officers (name, leadership, intelligence, strength, politics, charisma, is_player, rank, reputation, troops, is_commander, max_troops) 
+                            VALUES ($name, $lea, $int, $str, $pol, $cha, 0, 'Volunteer', 0, 250, 0, 250);
                             SELECT last_insert_rowid();";
 
                         cmd.Parameters.AddWithValue("$name", name);
-                        cmd.Parameters.AddWithValue("$lea", rng.Next(30, 90));
-                        cmd.Parameters.AddWithValue("$str", rng.Next(30, 90));
-                        cmd.Parameters.AddWithValue("$com", rng.Next(30, 90));
-                        cmd.Parameters.AddWithValue("$pol", rng.Next(30, 90));
+                        cmd.Parameters.AddWithValue("$lea", rng.Next(20, 75)); // Lower base, room for growth
+                        cmd.Parameters.AddWithValue("$int", rng.Next(20, 75));
+                        cmd.Parameters.AddWithValue("$str", rng.Next(20, 75));
+                        cmd.Parameters.AddWithValue("$pol", rng.Next(20, 75));
+                        cmd.Parameters.AddWithValue("$cha", rng.Next(30, 80)); // Charisma slightly buffered
 
                         long oid = (long)cmd.ExecuteScalar();
                         officerIds.Add(oid);
@@ -97,23 +97,37 @@ public partial class WorldGenerator : Node
                         long lid = leaders[i];
                         long fid = factionIds[i];
 
-                        // Buff Stats
-                        ExecuteSql(conn, "UPDATE officers SET leadership = 90, strategy = 85, combat = 85, rank = 'Ruler', faction_id = " + fid + " WHERE officer_id = " + lid);
+                        // Buff Stats, Set Rank 9 (Sovereign), Troops 5000
+                        // Leaders are strong but not "capped" at 100 on day 1. 
+                        // Variety: Some are better at fighting, some at thinking.
+                        int lLea = rng.Next(80, 92);
+                        int lInt = rng.Next(80, 92);
+                        int lStr = rng.Next(80, 92);
+                        int lPol = rng.Next(75, 88);
+                        int lCha = rng.Next(85, 95);
+
+                        ExecuteSql(conn, $"UPDATE officers SET leadership = {lLea}, intelligence = {lInt}, strength = {lStr}, politics = {lPol}, charisma = {lCha}, rank = 'Sovereign', troops = {GameConstants.TROOPS_SOVEREIGN}, max_troops = {GameConstants.TROOPS_SOVEREIGN}, faction_id = " + fid + " WHERE officer_id = " + lid);
+
                         ExecuteSql(conn, "UPDATE factions SET leader_id = " + lid + " WHERE faction_id = " + fid);
 
                         // Assign 1-3 Members
-                        int membersCount = rng.Next(1, 4);
+                        int membersCount = rng.Next(2, 5);
                         for (int m = 0; m < membersCount; m++)
                         {
                             if (freeOfficers.Count == 0) break;
                             long mid = freeOfficers[0];
                             freeOfficers.RemoveAt(0);
-                            ExecuteSql(conn, "UPDATE officers SET faction_id = " + fid + ", rank = 'Officer' WHERE officer_id = " + mid);
+
+                            // Rank 1-5, Troops 1000-3000
+                            int rankIdx = rng.Next(1, 4); // Regular to Captain
+                            string rankTitle = GameConstants.GetRankTitle(rankIdx);
+                            int troops = GameConstants.GetMaxTroops(rankTitle);
+                            // Ensure max_troops matches
+                            ExecuteSql(conn, $"UPDATE officers SET faction_id = {fid}, rank = '{rankTitle}', troops = {troops}, max_troops = {troops} WHERE officer_id = {mid}");
                         }
                     }
 
                     // 5. Assign HQs and Place Officers
-                    // Get all cities
                     var cityIds = new List<long>();
                     var cityCmd = conn.CreateCommand();
                     cityCmd.CommandText = "SELECT city_id FROM cities";
@@ -122,7 +136,16 @@ public partial class WorldGenerator : Node
                         while (r.Read()) cityIds.Add(r.GetInt64(0));
                     }
 
-                    var hqs = cityIds.OrderBy(x => rng.Next()).Take(3).ToList();
+                    // Load Graph for Distance Check
+                    var cityGraph = LoadCityGraph(conn);
+                    var hqs = PickDistantHQs(cityIds, cityGraph, 3, 3); // 3 Factions, Min Dist 3
+
+                    if (hqs == null)
+                    {
+                        GD.PrintErr("Could not find valid HQs with min distance 3. Fallback to random.");
+                        hqs = cityIds.OrderBy(x => rng.Next()).Take(3).ToList();
+                    }
+
                     for (int i = 0; i < 3; i++)
                     {
                         long fid = factionIds[i];
@@ -133,15 +156,19 @@ public partial class WorldGenerator : Node
 
                         // Move all Faction Members there
                         ExecuteSql(conn, $"UPDATE officers SET location_id = {hqId} WHERE faction_id = {fid}");
+
+                        // Set Leader as Commander (Simplest logic for now: Leader is Gov of HQ)
+                        long lid = leaders[i];
+                        ExecuteSql(conn, $"UPDATE officers SET is_commander = 1 WHERE officer_id = {lid}");
                     }
 
-                    // 6. Free Agents Logic?
-                    // "All remaining officers are free/scattered". 
-                    // Place them in random cities?
+                    // 6. Free Agents Logic
                     foreach (var oid in freeOfficers)
                     {
                         long loc = cityIds[rng.Next(cityIds.Count)];
-                        ExecuteSql(conn, $"UPDATE officers SET location_id = {loc} WHERE officer_id = {oid}");
+                        // Free Agents get a small personal guard
+                        int troops = GameConstants.TROOPS_VOLUNTEER;
+                        ExecuteSql(conn, $"UPDATE officers SET location_id = {loc}, troops = {troops}, max_troops = {GameConstants.TROOPS_VOLUNTEER} WHERE officer_id = {oid}");
                     }
 
                     transaction.Commit();
@@ -154,6 +181,87 @@ public partial class WorldGenerator : Node
                 }
             }
         }
+    }
+
+    private Dictionary<long, List<long>> LoadCityGraph(SqliteConnection conn)
+    {
+        var graph = new Dictionary<long, List<long>>();
+        var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT start_city_id, end_city_id FROM routes";
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read())
+            {
+                long u = r.GetInt64(0);
+                long v = r.GetInt64(1);
+                if (!graph.ContainsKey(u)) graph[u] = new List<long>();
+                // if (!graph.ContainsKey(v)) graph[v] = new List<long>(); // Routes are duplicated in DB? Let's assume directional for now or add both
+
+                graph[u].Add(v);
+                // graph[v].Add(u); // DB seems to double entries in seed_db.py, but safe to add just in case logic changes
+            }
+        }
+        return graph;
+    }
+
+    private List<long> PickDistantHQs(List<long> allCities, Dictionary<long, List<long>> graph, int count, int minHops)
+    {
+        var rng = new Random();
+        // Try X times to find a valid config
+        for (int attempt = 0; attempt < 100; attempt++)
+        {
+            var candidates = allCities.OrderBy(x => rng.Next()).Take(count).ToList();
+            if (IsValidConfiguration(candidates, graph, minHops))
+            {
+                return candidates;
+            }
+        }
+        return null;
+    }
+
+    private bool IsValidConfiguration(List<long> sites, Dictionary<long, List<long>> graph, int minHops)
+    {
+        // Check distance between every pair
+        for (int i = 0; i < sites.Count; i++)
+        {
+            for (int j = i + 1; j < sites.Count; j++)
+            {
+                int dist = GetShortestPath(sites[i], sites[j], graph);
+                if (dist < minHops) return false;
+            }
+        }
+        return true;
+    }
+
+    private int GetShortestPath(long start, long end, Dictionary<long, List<long>> graph)
+    {
+        if (start == end) return 0;
+        var visited = new HashSet<long>();
+        var queue = new Queue<Tuple<long, int>>();
+        queue.Enqueue(new Tuple<long, int>(start, 0));
+        visited.Add(start);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            long node = current.Item1;
+            int depth = current.Item2;
+
+            if (node == end) return depth;
+
+            if (graph.ContainsKey(node))
+            {
+                foreach (var neighbor in graph[node])
+                {
+                    if (!visited.Contains(neighbor))
+                    {
+                        visited.Add(neighbor);
+                        queue.Enqueue(new Tuple<long, int>(neighbor, depth + 1));
+                    }
+                }
+            }
+        }
+        return 999; // Unreachable
     }
 
     private void ExecuteSql(SqliteConnection conn, string sql)

@@ -107,7 +107,20 @@ def seed():
     import random
     
     first_names = ["Caelum", "Thorne", "Elara", "Vael", "Kael", "Lyra", "Roric", "Sylas", "Mara", "Dorn"]
-    last_names = ["Lightbringer", "Ironheart", "Shadowalker", "Oakenshield", "Stormcaller", "Vane", "Blackwood"]
+    # last_names = ["Lightbringer", "Ironheart", "Shadowalker", "Oakenshield", "Stormcaller", "Vane", "Blackwood"]
+    
+    rottk_names = [
+        "Cao Cao", "Liu Bei", "Sun Quan", "Lu Bu", "Guan Yu", "Zhang Fei", "Zhao Yun", "Zhuge Liang",
+        "Zhou Yu", "Sima Yi", "Yuan Shao", "Dong Zhuo", "Ma Chao", "Huang Zhong", "Sun Ce", "Taishi Ci",
+        "Lu Meng", "Lu Su", "Guo Jia", "Xun Yu", "Xiahou Dun", "Xiahou Yuan", "Zhang Liao", "Xu Huang",
+        "Dian Wei", "Pang Tong", "Wei Yan", "Jiang Wei", "Deng Ai", "Zhong Hui"
+    ]
+    random.shuffle(rottk_names) # Ensure distinct names each run
+    
+    def get_name():
+        if rottk_names:
+            return rottk_names.pop()
+        return f"Generic Officer {random.randint(100, 999)}"
     
     officers = []
     
@@ -115,33 +128,40 @@ def seed():
     hq_map = {loyalists: c_capital, separatists: c_ironhold, coalition: c_eldershade}
     
     for f in [loyalists, separatists, coalition]:
-        name = f"{random.choice(first_names)} the {f.name.split(' ')[0]}"
+        name = get_name()
         cmd = Officer(
             name=name, 
             faction=f, 
             location_id=hq_map[f].city_id,
             is_commander=True,
-            leadership=random.randint(80, 95),
-            strategy=random.randint(70, 90),
-            combat=random.randint(70, 95),
-            politics=random.randint(60, 90),
-            rank=5,
-            reputation=50
+            # High level but variety
+            leadership=random.randint(80, 92),
+            intelligence=random.randint(80, 92),
+            strength=random.randint(80, 92),
+            politics=random.randint(75, 88),
+            charisma=random.randint(85, 95),
+            rank="General",
+            reputation=50,
+            troops=5000,
+            max_troops=5000
         )
         officers.append(cmd)
         
         # 5b. Assign 1-3 Sub-officers to Commander
         for _ in range(random.randint(1, 3)):
             sub = Officer(
-                name=f"{random.choice(first_names)} {random.choice(last_names)}",
+                name=get_name(),
                 faction=f,
                 location_id=hq_map[f].city_id, # Spawn with commander
-                leadership=random.randint(40, 70),
-                strategy=random.randint(40, 70),
-                combat=random.randint(40, 70),
-                politics=random.randint(40, 70),
-                rank=2,
-                reputation=10
+                leadership=random.randint(20, 75),
+                intelligence=random.randint(20, 75),
+                strength=random.randint(20, 75),
+                politics=random.randint(20, 75),
+                charisma=random.randint(30, 80),
+                rank="Regular",
+                reputation=10,
+                troops=1000,
+                max_troops=1000
             )
             officers.append(sub)
 
@@ -150,15 +170,18 @@ def seed():
     
     for i in range(15):
         no = Officer(
-            name=f"{random.choice(first_names)} {random.choice(last_names)}",
+            name=get_name(),
             faction=None, 
             location_id=random.choice(all_city_ids), # Random town
-            leadership=random.randint(30, 70),
-            strategy=random.randint(30, 70),
-            combat=random.randint(30, 70),
-            politics=random.randint(30, 70),
-            rank=1,
-            reputation=0
+            leadership=random.randint(20, 75),
+            intelligence=random.randint(20, 75),
+            strength=random.randint(20, 75),
+            politics=random.randint(20, 75),
+            charisma=random.randint(30, 80),
+            rank="Volunteer",
+            reputation=0,
+            troops=random.randint(100, 300),
+            max_troops=500
         )
         if random.random() < 0.3: # 30% chance to be already in a faction
             no.faction = random.choice([loyalists, separatists, coalition])
@@ -190,15 +213,16 @@ def seed():
     connect("Twin Peaks", "Tiger Gate", 1.5, "Road", False)
     connect("Tiger Gate", "Sun Capital", 1.0, "Highway", False)
     
-    # South (Eldershade) -> Central
     connect("Eldershade", "Mistwood", 1.5, "Forest Path", False)
-    connect("Mistwood", "South Fields", 1.0, "Road", False) # South fields exists? Oh I removed it in replacement.
-    # Let's add South Fields back or use River Port
+    connect("Eldershade", "South Fields", 1.0, "Road", False) # Corrected to match image
+    connect("Eldershade", "River Port", 1.5, "Road", False) # New Connection
+    
     connect("Mistwood", "River Port", 2.0, "River", False)
     connect("River Port", "Sun Capital", 1.0, "Highway", False)
     
     # West/East Flanks
-    connect("Ironhold", "West Hills", 3.0, "Mountain Path", False)
+    # connect("Ironhold", "West Hills", 3.0, "Mountain Path", False) # REMOVED: Bypassed Twin Peaks
+    connect("Twin Peaks", "West Hills", 2.0, "Mountain Path", False) # Added: Logical flow
     connect("West Hills", "Central Plains", 2.0, "Road", False)
     connect("Central Plains", "Sun Capital", 1.0, "Road", False)
     

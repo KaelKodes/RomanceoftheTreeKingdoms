@@ -5,7 +5,7 @@ using System.Collections.Generic;
 
 public partial class DatabaseClient : Node
 {
-    private string _dbPath;
+    // private string _dbPath;
 
     public override void _Ready()
     {
@@ -20,11 +20,12 @@ public partial class DatabaseClient : Node
         // Project: D:/Kael Kodes/Tree Kingdoms/romance-of-tree-kingdoms/
         // DB:      D:/Kael Kodes/Tree Kingdoms/tree_kingdoms.db
 
-        _dbPath = System.IO.Path.Combine(projectPath, "../tree_kingdoms.db");
-        GD.Print($"[DB] Path: {_dbPath}");
+        // _dbPath = System.IO.Path.Combine(projectPath, "../tree_kingdoms.db");
+        // GD.Print($"[DB] Path: {_dbPath}");
+        DatabaseHelper.Initialize();
 
         // Run Migrations Synchronously
-        DatabaseMigration.Run(_dbPath);
+        DatabaseMigration.Run(DatabaseHelper.DbPath);
 
         TestConnection();
     }
@@ -33,7 +34,7 @@ public partial class DatabaseClient : Node
     {
         try
         {
-            using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
+            using (var connection = DatabaseHelper.GetConnection())
             {
                 connection.Open();
                 GD.Print("[DB] Connection Successful!");

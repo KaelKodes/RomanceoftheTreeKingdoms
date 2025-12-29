@@ -21,6 +21,11 @@ class Faction(Base):
     ideology = Column(String)
     is_player = Column(Boolean, default=False)
     
+    # Strategic AI Goals
+    monthly_goal = Column(String) # Conquer, Prosper, Defense
+    weekly_task = Column(String)  # Current milestone
+    goal_target_id = Column(Integer) # City or Officer ID target
+    
     # Relationships
     officers = relationship("Officer", back_populates="faction")
     cities = relationship("City", back_populates="faction")
@@ -63,14 +68,23 @@ class Officer(Base):
     
     # Attributes
     leadership = Column(Integer, default=50)
-    strategy = Column(Integer, default=50)
-    combat = Column(Integer, default=50)
+    intelligence = Column(Integer, default=50)
+    strength = Column(Integer, default=50)
     politics = Column(Integer, default=50)
+    charisma = Column(Integer, default=50)
     
     # Progression
-    rank = Column(Integer, default=1) # 1-10? Determines Action Points
+    rank = Column(String, default="Volunteer") # Determines Title & Troop Cap
     reputation = Column(Integer, default=0) # Global karma
     current_action_points = Column(Integer, default=3) # Refreshed daily
+    
+    # Troops
+    troops = Column(Integer, default=0)
+    max_troops = Column(Integer, default=1000)
+
+    # Strategic AI Assignments (Leader Orders)
+    current_assignment = Column(String)
+    assignment_target_id = Column(Integer)
     
     # Relationships
     faction = relationship("Faction", back_populates="officers")
@@ -93,11 +107,13 @@ class City(Base):
     name = Column(String, nullable=False)
     faction_id = Column(Integer, ForeignKey('factions.faction_id'))
     
-    # Stats
-    economic_value = Column(Integer, default=100)
-    strategic_value = Column(Integer, default=100)
-    strategic_value = Column(Integer, default=100)
-    defense_level = Column(Integer, default=1)
+    # City Stats (RotTK 8 Style)
+    agriculture = Column(Integer, default=100) # Yields Food
+    commerce = Column(Integer, default=100)    # Yields Gold
+    technology = Column(Integer, default=50)   # Unlocks Unit Tiers
+    public_order = Column(Integer, default=80) # Multiplier for yields (0-100)
+    defense_level = Column(Integer, default=100) # Gate/Wall HP in Sieges
+    max_stats = Column(Integer, default=1000)   # Cap for growth
     
     # Conquest Logic
     is_hq = Column(Integer, default=0) # 0 = False, 1 = True

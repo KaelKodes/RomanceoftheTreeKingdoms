@@ -2,23 +2,34 @@
 
 [ext_resource type="Script" uid="uid://8mfq57535ukx" path="res://scripts/ui/CityMenu.cs" id="1_l2vry"]
 
-[node name="CityMenu" type="Control"]
+[node name="CityMenu" type="Control" node_paths=PackedStringArray("TitleLabel", "InfoLabel", "OfficersHeader", "OfficerScroll", "OfficerContainer", "ActionsHeader", "ActionList")]
 layout_mode = 3
-anchors_preset = 15
+anchors_preset = 1
+anchor_left = 1.0
 anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
+grow_horizontal = 0
+size_flags_horizontal = 8
 script = ExtResource("1_l2vry")
+TitleLabel = NodePath("MarginContainer/VBoxContainer/TitleLabel")
+InfoLabel = NodePath("MarginContainer/VBoxContainer/InfoLabel")
+OfficersHeader = NodePath("MarginContainer/VBoxContainer/OfficersHeader")
+OfficerScroll = NodePath("MarginContainer/VBoxContainer/OfficerScroll")
+OfficerContainer = NodePath("MarginContainer/VBoxContainer/OfficerScroll/OfficerContainer")
+ActionsHeader = NodePath("MarginContainer/VBoxContainer/ActionsHeader")
+ActionList = NodePath("MarginContainer/VBoxContainer/ActionList")
 
 [node name="MarginContainer" type="MarginContainer" parent="."]
 layout_mode = 0
 offset_right = 40.0
 offset_bottom = 40.0
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
 
 [node name="ColorRect" type="ColorRect" parent="MarginContainer"]
 layout_mode = 2
-color = Color(0.2231029, 0.2231029, 0.22310287, 1)
+color = Color(0.2231029, 0.2231029, 0.22310287, 0.95)
 
 [node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
 layout_mode = 2
@@ -26,12 +37,33 @@ alignment = 1
 
 [node name="TitleLabel" type="Label" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
-text = "Title"
+text = "City Name"
 horizontal_alignment = 1
 
 [node name="InfoLabel" type="Label" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
-text = "Info"
+text = "City Info"
+horizontal_alignment = 1
+
+[node name="OfficersHeader" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "-- Officers --"
+horizontal_alignment = 1
+
+[node name="OfficerScroll" type="ScrollContainer" parent="MarginContainer/VBoxContainer"]
+custom_minimum_size = Vector2(0, 200)
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="OfficerContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/OfficerScroll"]
+clip_contents = true
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ActionsHeader" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "-- Actions --"
 horizontal_alignment = 1
 
 [node name="ActionList" type="VBoxContainer" parent="MarginContainer/VBoxContainer"]

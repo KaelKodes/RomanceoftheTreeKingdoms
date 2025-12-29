@@ -24,6 +24,31 @@ layout_mode = 2
 text = "Date"
 horizontal_alignment = 1
 
+[node name="FactionLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Faction"
+horizontal_alignment = 1
+
+[node name="RankLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Rank"
+horizontal_alignment = 1
+
+[node name="TroopsLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Troops"
+horizontal_alignment = 1
+
+[node name="RecordLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Record"
+horizontal_alignment = 1
+
+[node name="GoldLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Gold"
+horizontal_alignment = 1
+
 [node name="APLabel" type="Label" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
 text = "AP:"

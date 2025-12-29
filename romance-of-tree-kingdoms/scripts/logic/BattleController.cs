@@ -9,6 +9,7 @@ public partial class BattleController : Node2D
 	private BattleGrid _grid;
 
 	private List<UnitController> _units = new List<UnitController>();
+	private List<ControlPoint> _controlPoints = new List<ControlPoint>();
 	private UnitController _playerUnit; // Quick Ref to player
 	private UnitController _selectedUnit; // For UI selection
 
@@ -23,7 +24,7 @@ public partial class BattleController : Node2D
 	public override void _Ready()
 	{
 		_battleManager = GetNodeOrNull<BattleManager>("/root/BattleManager");
-		_grid = GetNodeOrNull<BattleGrid>("TileMap");
+		_grid = GetNodeOrNull<BattleGrid>("BattleGrid");
 		_unitScene = GD.Load<PackedScene>("res://scenes/Unit.tscn");
 
 		if (_battleManager == null || _grid == null || _unitScene == null)
@@ -51,8 +52,10 @@ public partial class BattleController : Node2D
 		// Update all units
 		foreach (var unit in _units)
 		{
-			unit.Tick(dt, _grid, _units);
+			unit.Tick(dt, _grid, _units, _controlPoints);
 		}
+
+		UpdateCPControl(dt);
 
 		// AI Cycle (Every 1 second)
 		_aiTimer += dt;
@@ -84,7 +87,7 @@ public partial class BattleController : Node2D
 			if (nearestEnemy != null)
 			{
 				// Update Focus (This makes them chase/attack)
-				unit.SetFocus(nearestEnemy.GridPosition);
+				unit.SetFocus(nearestEnemy.GridPosition, _grid);
 			}
 		}
 	}
@@ -184,7 +187,7 @@ public partial class BattleController : Node2D
 				if (_playerUnit != null)
 				{
 					GD.Print($"Order: Player -> {gridPos}");
-					_playerUnit.SetFocus(gridPos);
+					_playerUnit.SetFocus(gridPos, _grid);
 
 					// Visual Feedback (e.g., spawn a flag)
 				}
@@ -200,9 +203,22 @@ public partial class BattleController : Node2D
 		GD.Print($"Starting Real-Time Battle for {ctx.CityName}!");
 
 		// Generate CP Map
-		var cps = _grid.GenerateMapWithCPs(ctx.DefenderFactionId, ctx.AttackerFactionId);
+		_controlPoints = _grid.GenerateMapWithCPs(ctx.DefenderFactionId, ctx.AttackerFactionId);
 
-		SpawnUnits(ctx, cps);
+		// Refresh CP Visuals based on Player Context (so Blue points show as Blue)
+		// Assuming Player Faction is known or we deduce from Attacker/Defender roles
+		// If Player is Attacker, Attacker Points (AttackerFactionId) should be Blue.
+		bool playerIsAttacker = ctx.AttackerOfficers.Any(o => o.IsPlayer);
+		int allyFaction = playerIsAttacker ? ctx.AttackerFactionId : ctx.DefenderFactionId;
+
+		foreach (var cp in _controlPoints)
+		{
+			if (cp.OwnerFactionId == allyFaction) cp.UpdateVisuals(1); // Ally
+			else if (cp.OwnerFactionId != 0) cp.UpdateVisuals(-1); // Enemy
+			else cp.UpdateVisuals(0);
+		}
+
+		SpawnUnits(ctx, _controlPoints);
 
 		// Initial Orders (Dumb AI)
 		foreach (var u in _units)
@@ -214,10 +230,10 @@ public partial class BattleController : Node2D
 			}
 
 			// Simple AI: Charge the other side (For now, just Focus on Enemy HQ)
-			var enemyHQ = cps.FirstOrDefault(c => c.Type == ControlPoint.CPType.HQ && c.OwnerFactionId != (u.IsDefender ? ctx.DefenderFactionId : ctx.AttackerFactionId));
+			var enemyHQ = _controlPoints.FirstOrDefault(c => c.Type == ControlPoint.CPType.HQ && c.OwnerFactionId != (u.IsDefender ? ctx.DefenderFactionId : ctx.AttackerFactionId));
 
 			if (enemyHQ != null)
-				u.SetFocus(enemyHQ.GridPosition);
+				u.SetFocus(enemyHQ.GridPosition, _grid);
 		}
 	}
 
@@ -270,6 +286,118 @@ public partial class BattleController : Node2D
 		AddChild(unitNode);
 		unitNode.Initialize(officer, isDefender, isAlly);
 		unitNode.SetGridPosition(gridPos, _grid.GridToWorld(gridPos)); // Initialize Pos
+
+
+
 		_units.Add(unitNode);
+
+		_units.Add(unitNode);
+	}
+
+	private void HandleCPCapture(UnitController unit, ControlPoint cp)
+	{
+		// Update Visuals
+		cp.UpdateVisuals(unit.IsAlly ? 1 : -1);
+
+		// Decision Logic
+		if (unit.OfficerData.IsPlayer)
+		{
+			ShowCPTypeDialog(cp);
+		}
+		else
+		{
+			// AI Random Choice
+			var types = new[] { ControlPoint.CPType.SupplyDepot, ControlPoint.CPType.Outpost };
+			var choice = types[new Random().Next(types.Length)];
+			cp.SetType(choice);
+		}
+	}
+
+	private ConfirmationDialog _activeDialog;
+
+	private void ShowCPTypeDialog(ControlPoint cp)
+	{
+		if (_activeDialog != null) return; // Prevent multiple dialogs
+
+		_isPaused = true; // Pause Game Loop
+
+		_activeDialog = new ConfirmationDialog();
+		_activeDialog.Title = "Control Point Captured!";
+		_activeDialog.DialogText = "Choose how to utilize this location:\n\nOK = Supply Point (Restores Resources)\nCancel = Outpost (Defensive Bonus)";
+		_activeDialog.OkButtonText = "Supply Point";
+		_activeDialog.CancelButtonText = "Outpost";
+
+		_activeDialog.Confirmed += () =>
+		{
+			cp.SetType(ControlPoint.CPType.SupplyDepot);
+			_isPaused = false;
+			_activeDialog.QueueFree();
+			_activeDialog = null;
+		};
+		_activeDialog.Canceled += () =>
+		{
+			cp.SetType(ControlPoint.CPType.Outpost);
+			_isPaused = false;
+			_activeDialog.QueueFree();
+			_activeDialog = null;
+		};
+
+		AddChild(_activeDialog);
+		_activeDialog.PopupCentered();
+	}
+	private void UpdateCPControl(float dt)
+	{
+		// "King of the Hill" Logic
+		// Each CP checks who has more units nearby.
+
+		foreach (var cp in _controlPoints)
+		{
+			if (cp.IsDestroyed) continue;
+
+			Dictionary<int, int> factionCounts = new Dictionary<int, int>();
+			List<UnitController> capturers = new List<UnitController>();
+
+			foreach (var unit in _units)
+			{
+				if (unit.CurrentHP <= 0) continue;
+
+				int distManhattan = Math.Abs(cp.GridPosition.X - unit.GridPosition.X) + Math.Abs(cp.GridPosition.Y - unit.GridPosition.Y);
+				if (distManhattan <= 1)
+				{
+					if (!factionCounts.ContainsKey(unit.OfficerData.FactionId))
+						factionCounts[unit.OfficerData.FactionId] = 0;
+
+					factionCounts[unit.OfficerData.FactionId]++;
+					capturers.Add(unit);
+				}
+			}
+
+			if (factionCounts.Count == 0) continue; // No one here
+
+			// Find Winner
+			var sorted = factionCounts.OrderByDescending(kv => kv.Value).ToList();
+			int winnerFaction = sorted[0].Key;
+			int winnerCount = sorted[0].Value;
+
+			// Check for Tie (if more than 1 faction present)
+			if (sorted.Count > 1 && sorted[1].Value == winnerCount)
+			{
+				// Tie! No change. Or Contested status?
+				// For now, simple "Defender Holds" or "No Change".
+				continue;
+			}
+
+			// Capture?
+			if (cp.OwnerFactionId != winnerFaction)
+			{
+				// Valid Capture
+				cp.SetOwner(winnerFaction);
+				GD.Print($"Faction {winnerFaction} took control of {cp.Type} (Strength: {winnerCount})");
+
+				// Find a representative unit for the dialogue logic
+				var rep = capturers.First(u => u.OfficerData.FactionId == winnerFaction);
+				HandleCPCapture(rep, cp);
+			}
+		}
 	}
 }

@@ -11,7 +11,7 @@ public partial class TurnManager : Node
     [Signal] public delegate void NewWeekStartedEventHandler();
 
     public static TurnManager Instance { get; private set; }
-    private string _dbPath;
+    // private string _dbPath; // Removed
 
     // Turn State
     private List<int> _turnQueue = new List<int>();
@@ -21,7 +21,7 @@ public partial class TurnManager : Node
     public override void _Ready()
     {
         Instance = this;
-        _dbPath = System.IO.Path.Combine(ProjectSettings.GlobalizePath("res://"), "../tree_kingdoms.db");
+        // _dbPath not needed, using DatabaseHelper
     }
 
     // Called by ActionManager.EndDay or directly from UI "End Turn" button
@@ -47,6 +47,25 @@ public partial class TurnManager : Node
         {
             RollInitiative();
             EmitSignal(SignalName.NewWeekStarted);
+
+            // AI Strategic Refresh
+            var ai = GetNode<FactionAI>("/root/FactionAI");
+            using (var conn = DatabaseHelper.GetConnection())
+            {
+                conn.Open();
+
+                // Monthly Cycle (approx 4 weeks)
+                if (currentDay == 1 || (currentDay - 1) % 28 == 0)
+                {
+                    GD.Print("[TurnManager] NEW MONTH! Refreshing Strategic Goals...");
+                    RefreshAllFactionGoals(conn, ai, true);
+                }
+                else
+                {
+                    GD.Print("[TurnManager] NEW WEEK! Refreshing Weekly Tasks...");
+                    RefreshAllFactionGoals(conn, ai, false);
+                }
+            }
         }
 
         _currentTurnIndex = -1;
@@ -59,7 +78,7 @@ public partial class TurnManager : Node
         var factionScores = new Dictionary<int, float>();
         var rng = new Random();
 
-        using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        using (var conn = DatabaseHelper.GetConnection())
         {
             conn.Open();
             var cmd = conn.CreateCommand();
@@ -67,7 +86,7 @@ public partial class TurnManager : Node
             // Assuming Highest Rank or specific 'is_commander' flag. 
             // For now, let's grab the officer with MAX(strategy) in the faction as the "Brain"
             cmd.CommandText = @"
-				SELECT f.faction_id, MAX(o.strategy) as strat, MAX(o.leadership) as lead
+				SELECT f.faction_id, MAX(o.intelligence) as strat, MAX(o.leadership) as lead
 				FROM factions f
 				JOIN officers o ON f.faction_id = o.faction_id
 				GROUP BY f.faction_id
@@ -88,7 +107,7 @@ public partial class TurnManager : Node
 
             // 2. Calculate Initiative for Player (Independent Turn - ID -1)
             var playerCmd = conn.CreateCommand();
-            playerCmd.CommandText = "SELECT strategy, leadership FROM officers WHERE is_player = 1";
+            playerCmd.CommandText = "SELECT intelligence, leadership FROM officers WHERE is_player = 1";
             using (var reader = playerCmd.ExecuteReader())
             {
                 if (reader.Read())
@@ -176,7 +195,7 @@ public partial class TurnManager : Node
         if (factionId == -1) return true;
 
         // Otherwise, check if player is the LEADER of this faction
-        using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        using (var conn = DatabaseHelper.GetConnection())
         {
             conn.Open();
             var cmd = conn.CreateCommand();
@@ -189,7 +208,7 @@ public partial class TurnManager : Node
 
     private int GetCurrentDay()
     {
-        using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        using (var conn = DatabaseHelper.GetConnection())
         {
             conn.Open();
             var cmd = conn.CreateCommand();
@@ -202,7 +221,7 @@ public partial class TurnManager : Node
     private void ProcessCityDecay()
     {
         GD.Print("[TurnManager] Processing City Decay...");
-        using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        using (var conn = DatabaseHelper.GetConnection())
         {
             conn.Open();
             // Get all owned cities
@@ -262,21 +281,23 @@ public partial class TurnManager : Node
     }
 
     // Conflict Resolution
-    private Queue<int> _conflictQueue = new Queue<int>();
+    private Queue<(int cityId, int attackerFactionId)> _conflictQueue = new Queue<(int, int)>();
 
     private bool CheckForConflicts()
     {
         _conflictQueue.Clear();
-        using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        using (var conn = DatabaseHelper.GetConnection())
         {
             conn.Open();
             var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT location_id FROM pending_battles";
+            cmd.CommandText = "SELECT location_id, attacker_faction_id FROM pending_battles";
             using (var reader = cmd.ExecuteReader())
             {
                 while (reader.Read())
                 {
-                    _conflictQueue.Enqueue(reader.GetInt32(0));
+                    int loc = reader.GetInt32(0);
+                    int att = reader.GetInt32(1);
+                    _conflictQueue.Enqueue((loc, att));
                 }
             }
         }
@@ -291,7 +312,9 @@ public partial class TurnManager : Node
             return;
         }
 
-        int cityId = _conflictQueue.Dequeue();
+        var conflict = _conflictQueue.Dequeue();
+        int cityId = conflict.cityId;
+        int attackerFactionId = conflict.attackerFactionId;
 
         // Check if player is involved
         var bm = GetNode<BattleManager>("/root/BattleManager");
@@ -311,11 +334,27 @@ public partial class TurnManager : Node
         }
         else
         {
-            GD.Print("AI Conflict. Simulating...");
+            GD.Print($"AI Conflict at City {cityId}. Attacker Faction: {attackerFactionId}. Simulating...");
             // Simulate immediately
-            // We need an Attacker ID for SimulateBattle signature...
-            // Let's grab the first non-neutral attacker
-            int attId = bm.CurrentContext.AttackerOfficers.FirstOrDefault()?.OfficerId ?? 0;
+            // Find an officer belonging to the identified Attacker Faction
+            int attId = 0;
+            var champion = bm.CurrentContext.AttackerOfficers
+                .Where(o => o.FactionId == attackerFactionId)
+                .OrderByDescending(o => o.Strength) // Strongest leads
+                .FirstOrDefault();
+
+            if (champion != null)
+            {
+                attId = champion.OfficerId;
+            }
+            else
+            {
+                // Fallback: If no officer of that faction is physically present (Bug? Or they left?), 
+                // pick ANY attacker to prevent stuck logic, but log warning.
+                GD.PrintErr($"[ResolveNextConflict] No officer of faction {attackerFactionId} found at {cityId}! Picking random attacker.");
+                attId = bm.CurrentContext.AttackerOfficers.FirstOrDefault()?.OfficerId ?? 0;
+            }
+
             bm.SimulateBattle(attId, cityId);
 
             // Remove from pending
@@ -325,7 +364,6 @@ public partial class TurnManager : Node
             CallDeferred(nameof(ResolveNextConflict));
         }
     }
-
     public void ResumeConflictResolution()
     {
         // Called by BattleManager after Player Battle
@@ -338,7 +376,7 @@ public partial class TurnManager : Node
 
     private void ResolvePendingBattleDB(int cityId)
     {
-        using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        using (var conn = DatabaseHelper.GetConnection())
         {
             conn.Open();
             var cmd = conn.CreateCommand();
@@ -356,6 +394,23 @@ public partial class TurnManager : Node
         am.EndDay();
 
         StartNewDay();
+    }
+
+    private void RefreshAllFactionGoals(SqliteConnection conn, FactionAI ai, bool monthly)
+    {
+        var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT faction_id FROM factions";
+        var fids = new List<int>();
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read()) fids.Add(r.GetInt32(0));
+        }
+
+        foreach (var fid in fids)
+        {
+            if (monthly) ai.UpdateMonthlyGoal(conn, fid);
+            ai.UpdateWeeklyTask(conn, fid);
+        }
     }
 
     private void ExecuteSql(SqliteConnection conn, string sql)

@@ -5,124 +5,216 @@ using System.Collections.Generic;
 
 public partial class CityMenu : Control
 {
+	[Signal] public delegate void OfficerSelectedEventHandler(int officerId);
+	[Signal] public delegate void InteractionEndedEventHandler();
+
 	private string _cityName;
 
 	// UI References
-	private Label _titleLabel;
-	private Label _infoLabel;
-	private Control _actionList;
+	[Export] public Label TitleLabel { get; set; }
+	[Export] public Label InfoLabel { get; set; }
+	[Export] public Label OfficersHeader { get; set; }
+	[Export] public ScrollContainer OfficerScroll { get; set; }
+	[Export] public VBoxContainer OfficerContainer { get; set; }
+	[Export] public Label ActionsHeader { get; set; }
+	[Export] public Control ActionList { get; set; }
 
 	public override void _Ready()
 	{
-		// Wire up nodes based on your screenshot structure:
-		// CityMenu (Root) -> MarginContainer -> VBoxContainer -> [TitleLabel, InfoLabel, ActionList]
-		_titleLabel = GetNode<Label>("MarginContainer/VBoxContainer/TitleLabel");
-		_infoLabel = GetNode<Label>("MarginContainer/VBoxContainer/InfoLabel");
-		_actionList = GetNode<Control>("MarginContainer/VBoxContainer/ActionList");
+		// UI is now wired via [Export] / Scene
 	}
 
 	public void Init(string cityName)
 	{
 		_cityName = cityName;
 		// If _Ready hasn't run yet (e.g. just instantiated), defer the update
-		CallDeferred(nameof(RefreshData));
-	}
+        CallDeferred(nameof(RefreshData));
+    }
 
-	public void RefreshData()
-	{
-		if (_titleLabel == null) return;
+    public void RefreshData()
+    {
+        if (TitleLabel == null) return;
 
-		string dbPath = System.IO.Path.Combine(ProjectSettings.GlobalizePath("res://"), "../tree_kingdoms.db");
-		using (var connection = new SqliteConnection($"Data Source={dbPath}"))
-		{
-			connection.Open();
+        string dbPath = System.IO.Path.Combine(ProjectSettings.GlobalizePath("res://"), "../tree_kingdoms.db");
+        using (var connection = new SqliteConnection($"Data Source={dbPath}"))
+        {
+            connection.Open();
 
-			// 1. Get City Info
-			var cmd = connection.CreateCommand();
-			cmd.CommandText = @"
-                SELECT c.economic_value, c.strategic_value, c.defense_level, f.name,
-				       (SELECT COUNT(DISTINCT o2.faction_id) FROM officers o2 WHERE o2.location_id = c.city_id AND o2.faction_id IS NOT NULL) as faction_count
+            // 1. Get City Info
+            var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                SELECT c.commerce, c.agriculture, c.defense_level, f.name,
+				       (SELECT COUNT(DISTINCT o2.faction_id) FROM officers o2 WHERE o2.location_id = c.city_id AND o2.faction_id IS NOT NULL) as faction_count,
+					   c.city_id,
+					   c.technology, c.public_order,
+					   f.color
                 FROM cities c
                 LEFT JOIN factions f ON c.faction_id = f.faction_id
 				WHERE c.name = $name";
-			cmd.Parameters.AddWithValue("$name", _cityName);
+            cmd.Parameters.AddWithValue("$name", _cityName);
 
-			using (var reader = cmd.ExecuteReader())
-			{
-				if (reader.Read())
-				{
-					long econ = reader.GetInt64(0);
-					long strat = reader.GetInt64(1);
-					long def = reader.GetInt64(2);
-					string faction = reader.IsDBNull(3) ? "Neutral" : reader.GetString(3);
-					bool isContested = reader.GetInt64(4) > 1;
+            int cityId = -1;
 
-					// Update UI Labels
-					_titleLabel.Text = $"{_cityName} ({faction})";
-					if (isContested) _titleLabel.Text += " [WARZONE]";
+            using (var reader = cmd.ExecuteReader())
+            {
+                if (reader.Read())
+                {
+                    long econ = reader.IsDBNull(0) ? 0 : reader.GetInt64(0);
+                    long agric = reader.IsDBNull(1) ? 0 : reader.GetInt64(1);
+                    long def = reader.GetInt64(2);
+                    string faction = reader.IsDBNull(3) ? "Neutral" : reader.GetString(3);
+                    bool isContested = reader.GetInt64(4) > 1;
+                    cityId = reader.GetInt32(5);
+                    long tech = reader.IsDBNull(6) ? 0 : reader.GetInt64(6);
+                    long order = reader.IsDBNull(7) ? 50 : reader.GetInt64(7);
+                    string fColor = reader.IsDBNull(8) ? "#FFFFFF" : reader.GetString(8);
 
-					_infoLabel.Text = $"Economy: {econ}\nStrategy: {strat}\nDefense: {def}";
+                    // Update UI Labels
+                    TitleLabel.Text = $"{_cityName} ({faction})";
+                    TitleLabel.AddThemeColorOverride("font_color", new Color(fColor));
+                    if (isContested) TitleLabel.Text += " [WARZONE]";
 
-					SetupActions(isContested);
-				}
-			}
-		}
-	}
+                    InfoLabel.Text = $"Merchant: {econ} | Farm: {agric} | Def: {def}\nTech: {tech} | Order: {order}";
 
-	private void SetupActions(bool isContested)
-	{
-		// Clear previous buttons
-		foreach (Node child in _actionList.GetChildren()) child.QueueFree();
+                    SetupActions(isContested);
+                }
+            }
 
-		// Check Action Manager for context
-		var actionMgr = GetNodeOrNull<ActionManager>("/root/ActionManager");
-		if (actionMgr == null)
-		{
-			GD.PrintErr("ActionManager Autoload not found! Cannot determine context.");
-			AddActionButton("Close", nameof(OnClosePressed));
-			return;
-		}
+            if (cityId != -1)
+            {
+                PopulateOfficerList(connection, cityId);
+            }
+        }
+    }
 
-		int playerId = GetPlayerId();
-		int cityId = GetCityId(_cityName);
-		long currentPlayerLoc = actionMgr.GetPlayerLocation(playerId);
+    private void PopulateOfficerList(SqliteConnection conn, int cityId)
+    {
+        // Clear existing
+        foreach (Node child in OfficerContainer.GetChildren())
+        {
+            child.QueueFree();
+        }
 
-		// Context Logic
-		if (currentPlayerLoc == cityId)
-		{
-			// Check DB for Pending Battle
-			bool isBattlePending = CheckPendingBattle(cityId);
+        var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+			SELECT o.officer_id, o.name, o.troops, f.color, f.name, o.rank, o.is_commander
+			FROM officers o
+			LEFT JOIN factions f ON o.faction_id = f.faction_id
+			WHERE o.location_id = $cid
+			ORDER BY o.is_commander DESC, o.rank DESC"; // Commanders first, then highest rank
+        cmd.Parameters.AddWithValue("$cid", cityId);
 
-			if (isBattlePending)
-			{
-				var label = new Label();
-				label.Text = "Battle Declared (Pending End of Turn)";
-				label.Modulate = Colors.Orange;
-				_actionList.AddChild(label);
-			}
-			else
-			{
-				// Check for potential conflict
-				int playerFaction = GetPlayerFaction(playerId);
-				// Is there an enemy faction here?
-				bool hasEnemy = CheckEnemyPresence(cityId, playerFaction);
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read())
+            {
+                int id = r.GetInt32(0);
+                string name = r.GetString(1);
+                int troops = r.IsDBNull(2) ? 0 : r.GetInt32(2);
+                string hexColor = r.IsDBNull(3) ? "#CCCCCC" : r.GetString(3);
+                string factionName = r.IsDBNull(4) ? "Free" : r.GetString(4);
+                string rank = r.IsDBNull(5) ? "Volunteer" : r.GetString(5);
+                bool isGov = !r.IsDBNull(6) && r.GetBoolean(6);
 
-				if (playerFaction > 0 && hasEnemy)
-				{
-					// Connectivity Check managed by "TryDeclareAttack" which calls AM.DeclareAttack
-					// But we should visually cue it here if possible. 
+                var btn = new Button();
+                string prefix = isGov ? "[Gov] " : "";
+                // Direct string usage, or title case if needed
+                btn.Text = $"{prefix}{name} ({rank}, {troops})";
+                btn.Alignment = HorizontalAlignment.Left;
+
+                // Apply Color to Text
+                btn.AddThemeColorOverride("font_color", new Color(hexColor));
+
+                btn.Pressed += () => OnOfficerPressed(id);
+                OfficerContainer.AddChild(btn);
+            }
+        }
+    }
+
+    private void OnOfficerPressed(int officerId)
+    {
+        GD.Print($"Clicked Officer {officerId}. Emitting Signal...");
+        EmitSignal(SignalName.OfficerSelected, officerId);
+    }
+
+    private void SetupActions(bool isContested)
+    {
+        // Clear previous buttons
+        foreach (Node child in ActionList.GetChildren()) child.QueueFree();
+
+        // Check Action Manager for context
+        var actionMgr = GetNodeOrNull<ActionManager>("/root/ActionManager");
+        if (actionMgr == null)
+        {
+            GD.PrintErr("ActionManager Autoload not found! Cannot determine context.");
+            AddActionButton("Close", nameof(OnClosePressed));
+            return;
+        }
+
+        int playerId = GetPlayerId();
+        int cityId = GetCityId(_cityName);
+        long currentPlayerLoc = actionMgr.GetPlayerLocation(playerId);
+
+        // Context Logic
+        if (currentPlayerLoc == cityId)
+        {
+            // Check DB for Pending Battle
+            bool isBattlePending = CheckPendingBattle(cityId);
+
+            if (isBattlePending)
+            {
+                var label = new Label();
+                label.Text = "Battle Declared (End of Turn)";
+                label.Modulate = Colors.Orange;
+                ActionList.AddChild(label);
+            }
+            else
+            {
+                // Check for potential conflict
+                int playerFaction = GetPlayerFaction(playerId);
+                // Is there an enemy faction here?
+                bool hasEnemy = CheckEnemyPresence(cityId, playerFaction);
+
+                if (playerFaction > 0 && hasEnemy)
+                {
+                    // Connectivity Check managed by "TryDeclareAttack" which calls AM.DeclareAttack
+                    // But we should visually cue it here if possible. 
 					// Let's just try to Declare Attack on click and let AM handle error printing for now to keep UI simple.
 					// Or perform a pre-check.
 					AddActionButton("Declare Attack!", nameof(OnDeclareAttackPressed));
 				}
 
-				AddActionButton("Assist City (-1 AP)", nameof(OnAssistPressed));
-				// AddActionButton("Visit Officers", nameof(OnVisitPressed));
+				AddActionButton("Develop Commerce (Pol)", nameof(OnCommercePressed));
+				AddActionButton("Cultivate Land (Pol)", nameof(OnAgriculturePressed));
+				AddActionButton("Bolster Defense (Lea)", nameof(OnDefensePressed));
+				AddActionButton("Patrol / Order (Str)", nameof(OnPublicOrderPressed));
+				AddActionButton("Research (Int)", nameof(OnTechnologyPressed));
+
+				// Wisdom / Personal Actions
+				AddActionButton("---------------", null); // Divider
+				AddActionButton("Rest (Heal Army)", nameof(OnRestPressed));
+				AddActionButton("Study Stats", nameof(OnStudyPressed));
+
+				if (playerFaction > 0) // And not sovereign? Checked in AM
+				{
+					AddActionButton("Resign", nameof(OnResignPressed));
+				}
 			}
 		}
 		else
 		{
 			AddActionButton("Travel Here (-1 AP)", nameof(OnTravelPressed));
+
+			// If Ronin and Neutral City -> Rise Up
+			int playerFaction = GetPlayerFaction(playerId);
+			if (playerFaction == 0)
+			{
+				bool isNeutral = CheckCityNeutral(cityId);
+				if (isNeutral)
+				{
+					AddActionButton("Rise Up (Found Faction)", nameof(OnRiseUpPressed));
+				}
+			}
 		}
 
 		AddActionButton("Close", nameof(OnClosePressed));
@@ -198,7 +290,7 @@ public partial class CityMenu : Control
 		var btn = new Button();
 		btn.Text = text;
 		btn.Pressed += () => Call(methodName);
-		_actionList.AddChild(btn);
+		ActionList.AddChild(btn);
 	}
 
 	// Button Handlers
@@ -207,13 +299,17 @@ public partial class CityMenu : Control
 		GD.Print("Preparing for Battle...");
 		int cityId = GetCityId(_cityName);
 
+		// Check BattleManager context?
 		var bm = GetNode<BattleManager>("/root/BattleManager");
 		bm.CreateContext(cityId);
 
-		// Close this menu to make room for SETUP UI
-		QueueFree();
+		// Hide this menu to make room for SETUP UI
+		Hide();
+		EmitSignal(SignalName.InteractionEnded);
 
-		// Load BattleSetupUI
+		// Load BattleSetupUI - logic remains similar as BattleSetup might still be dynamic for now?
+		// Or should we ask WorldMap to handle this too? 
+		// For now, let's keep BattleSetup dynamic as user didn't request it yet.
 		var setupScene = GD.Load<PackedScene>("res://scenes/BattleSetupUI.tscn");
 		if (setupScene != null)
 		{
@@ -225,13 +321,18 @@ public partial class CityMenu : Control
 		}
 	}
 
-	public void OnAssistPressed()
+	public void OnCommercePressed() { PerformDomestic(ActionManager.DomesticType.Commerce); }
+	public void OnAgriculturePressed() { PerformDomestic(ActionManager.DomesticType.Agriculture); }
+	public void OnDefensePressed() { PerformDomestic(ActionManager.DomesticType.Defense); }
+	public void OnPublicOrderPressed() { PerformDomestic(ActionManager.DomesticType.PublicOrder); }
+	public void OnTechnologyPressed() { PerformDomestic(ActionManager.DomesticType.Technology); }
+
+	private void PerformDomestic(ActionManager.DomesticType type)
 	{
 		var actionMgr = GetNode<ActionManager>("/root/ActionManager");
 		int playerId = GetPlayerId();
 		int cityId = GetCityId(_cityName);
-
-		actionMgr.PerformAssist(playerId, cityId);
+		actionMgr.PerformDomesticAction(playerId, cityId, type);
 		RefreshData();
 	}
 
@@ -242,12 +343,85 @@ public partial class CityMenu : Control
 		int cityId = GetCityId(_cityName);
 
 		actionMgr.PerformTravel(playerId, cityId);
-		QueueFree(); // Close menu after travel
+		Hide(); // Close menu after travel
+		EmitSignal(SignalName.InteractionEnded);
 	}
 
 	public void OnClosePressed()
 	{
-		QueueFree();
+		Hide();
+		EmitSignal(SignalName.InteractionEnded);
+	}
+
+	public void OnRestPressed()
+	{
+		var actionMgr = GetNode<ActionManager>("/root/ActionManager");
+		int playerId = GetPlayerId();
+		actionMgr.PerformRest(playerId);
+		RefreshData();
+	}
+
+	public void OnResignPressed()
+	{
+		var actionMgr = GetNode<ActionManager>("/root/ActionManager");
+		int playerId = GetPlayerId();
+		actionMgr.PerformResign(playerId);
+		RefreshData();
+	}
+
+	public void OnRiseUpPressed()
+	{
+		var actionMgr = GetNode<ActionManager>("/root/ActionManager");
+		int playerId = GetPlayerId();
+		int cityId = GetCityId(_cityName);
+		actionMgr.PerformRiseUp(playerId, cityId);
+		RefreshData();
+	}
+
+	// Simple Study Toggle for now - Ideally a popup
+	private bool _showingStudy = false;
+	public void OnStudyPressed()
+	{
+		if (_showingStudy) { RefreshData(); _showingStudy = false; return; }
+
+		_showingStudy = true;
+		// Clear actions and show study options
+		foreach (Node child in ActionList.GetChildren()) child.QueueFree();
+
+		AddActionButton("Study Leadership", nameof(OnStudyLea));
+		AddActionButton("Study Intelligence", nameof(OnStudyInt));
+		AddActionButton("Study Strength", nameof(OnStudyStr));
+		AddActionButton("Study Politics", nameof(OnStudyPol));
+		AddActionButton("Study Charisma", nameof(OnStudyCha));
+		AddActionButton("Back", nameof(RefreshData));
+	}
+
+	public void OnStudyLea() { DoStudy("Leadership"); }
+	public void OnStudyInt() { DoStudy("Intelligence"); }
+	public void OnStudyStr() { DoStudy("Strength"); }
+	public void OnStudyPol() { DoStudy("Politics"); }
+	public void OnStudyCha() { DoStudy("Charisma"); }
+
+	private void DoStudy(string stat)
+	{
+		var actionMgr = GetNode<ActionManager>("/root/ActionManager");
+		int playerId = GetPlayerId();
+		actionMgr.PerformStudy(playerId, stat);
+		OnStudyPressed(); // Refresh study menu 
+	}
+
+	private bool CheckCityNeutral(int cityId)
+	{
+		string dbPath = System.IO.Path.Combine(ProjectSettings.GlobalizePath("res://"), "../tree_kingdoms.db");
+		using (var connection = new SqliteConnection($"Data Source={dbPath}"))
+		{
+			connection.Open();
+			var cmd = connection.CreateCommand();
+			cmd.CommandText = "SELECT faction_id FROM cities WHERE city_id = $cid";
+			cmd.Parameters.AddWithValue("$cid", cityId);
+			var res = cmd.ExecuteScalar();
+			return (res == null || res == DBNull.Value || (long)res == 0);
+		}
 	}
 
 	// Database Helpers

@@ -8,9 +8,10 @@ public partial class CharacterCreation : Control
 	[Export] public LineEdit NameInput;
 
 	[Export] public SpinBox LeadershipSpinBox;
-	[Export] public SpinBox StrategySpinBox;
-	[Export] public SpinBox CombatSpinBox;
+	[Export] public SpinBox IntelligenceSpinBox;
+	[Export] public SpinBox StrengthSpinBox;
 	[Export] public SpinBox PoliticsSpinBox;
+	[Export] public SpinBox CharismaSpinBox;
 
 	[Export] public SpinBox PointsLeftSpinBox; // Used as a display
 
@@ -23,21 +24,24 @@ public partial class CharacterCreation : Control
 	{
 		// Initialize SpinBoxes
 		if (LeadershipSpinBox != null) LeadershipSpinBox.Value = _baseStat;
-		if (StrategySpinBox != null) StrategySpinBox.Value = _baseStat;
-		if (CombatSpinBox != null) CombatSpinBox.Value = _baseStat;
+		if (IntelligenceSpinBox != null) IntelligenceSpinBox.Value = _baseStat;
+		if (StrengthSpinBox != null) StrengthSpinBox.Value = _baseStat;
 		if (PoliticsSpinBox != null) PoliticsSpinBox.Value = _baseStat;
+		if (CharismaSpinBox != null) CharismaSpinBox.Value = _baseStat;
 
 		// Store initial values
 		if (LeadershipSpinBox != null) _prevValues[LeadershipSpinBox] = _baseStat;
-		if (StrategySpinBox != null) _prevValues[StrategySpinBox] = _baseStat;
-		if (CombatSpinBox != null) _prevValues[CombatSpinBox] = _baseStat;
+		if (IntelligenceSpinBox != null) _prevValues[IntelligenceSpinBox] = _baseStat;
+		if (StrengthSpinBox != null) _prevValues[StrengthSpinBox] = _baseStat;
 		if (PoliticsSpinBox != null) _prevValues[PoliticsSpinBox] = _baseStat;
+		if (CharismaSpinBox != null) _prevValues[CharismaSpinBox] = _baseStat;
 
 		// Connect ValueChanged signals
 		if (LeadershipSpinBox != null) LeadershipSpinBox.ValueChanged += (val) => UpdatePoints(LeadershipSpinBox);
-		if (StrategySpinBox != null) StrategySpinBox.ValueChanged += (val) => UpdatePoints(StrategySpinBox);
-		if (CombatSpinBox != null) CombatSpinBox.ValueChanged += (val) => UpdatePoints(CombatSpinBox);
+		if (IntelligenceSpinBox != null) IntelligenceSpinBox.ValueChanged += (val) => UpdatePoints(IntelligenceSpinBox);
+		if (StrengthSpinBox != null) StrengthSpinBox.ValueChanged += (val) => UpdatePoints(StrengthSpinBox);
 		if (PoliticsSpinBox != null) PoliticsSpinBox.ValueChanged += (val) => UpdatePoints(PoliticsSpinBox);
+		if (CharismaSpinBox != null) CharismaSpinBox.ValueChanged += (val) => UpdatePoints(CharismaSpinBox);
 
 		UpdatePoints(null);
 	}
@@ -46,11 +50,12 @@ public partial class CharacterCreation : Control
 	{
 		// Calculate current usage
 		int currentL = (int)LeadershipSpinBox.Value;
-		int currentS = (int)StrategySpinBox.Value;
-		int currentC = (int)CombatSpinBox.Value;
+		int currentI = (int)IntelligenceSpinBox.Value;
+		int currentS = (int)StrengthSpinBox.Value;
 		int currentP = (int)PoliticsSpinBox.Value;
+		int currentCh = (int)CharismaSpinBox.Value;
 
-		int usedPoints = (currentL - _baseStat) + (currentS - _baseStat) + (currentC - _baseStat) + (currentP - _baseStat);
+		int usedPoints = (currentL - _baseStat) + (currentI - _baseStat) + (currentS - _baseStat) + (currentP - _baseStat) + (currentCh - _baseStat);
 		int remaining = _totalPoints - usedPoints;
 
 		if (remaining < 0 && changedBox != null)
@@ -64,9 +69,10 @@ public partial class CharacterCreation : Control
 		{
 			// Update previous values for next time
 			if (LeadershipSpinBox != null) _prevValues[LeadershipSpinBox] = LeadershipSpinBox.Value;
-			if (StrategySpinBox != null) _prevValues[StrategySpinBox] = StrategySpinBox.Value;
-			if (CombatSpinBox != null) _prevValues[CombatSpinBox] = CombatSpinBox.Value;
+			if (IntelligenceSpinBox != null) _prevValues[IntelligenceSpinBox] = IntelligenceSpinBox.Value;
+			if (StrengthSpinBox != null) _prevValues[StrengthSpinBox] = StrengthSpinBox.Value;
 			if (PoliticsSpinBox != null) _prevValues[PoliticsSpinBox] = PoliticsSpinBox.Value;
+			if (CharismaSpinBox != null) _prevValues[CharismaSpinBox] = CharismaSpinBox.Value;
 		}
 
 		// Display remaining
@@ -102,8 +108,8 @@ public partial class CharacterCreation : Control
 		wg.GenerateNewWorld();
 		// wg.QueueFree(); // Not in tree, just GC
 
-		string dbPath = System.IO.Path.Combine(ProjectSettings.GlobalizePath("res://"), "../tree_kingdoms.db");
-		using (var connection = new SqliteConnection($"Data Source={dbPath}"))
+		// string dbPath = System.IO.Path.Combine(ProjectSettings.GlobalizePath("res://"), "../tree_kingdoms.db");
+		using (var connection = DatabaseHelper.GetConnection())
 		{
 			connection.Open();
 
@@ -118,17 +124,18 @@ public partial class CharacterCreation : Control
 			// 3. Insert Player
 			var command = connection.CreateCommand();
 			command.CommandText =
-            @"
-				INSERT INTO officers (name, leadership, strategy, combat, politics, faction_id, location_id, is_player, rank, reputation, current_action_points)
-				VALUES ($name, $lea, $str, $com, $pol, NULL, 1, 1, 'Officer', 0, 3);
-				
-				INSERT INTO game_state (current_day, player_id) VALUES (1, last_insert_rowid());
+			@"
+                INSERT INTO officers (name, leadership, intelligence, strength, politics, charisma, faction_id, location_id, is_player, rank, reputation, current_action_points, troops, max_troops)
+                VALUES ($name, $lea, $int, $str, $pol, $cha, NULL, 1, 1, 'Volunteer', 0, 3, 250, 250);
+                
+                INSERT INTO game_state (current_day, player_id) VALUES (1, last_insert_rowid());
 			";
 			command.Parameters.AddWithValue("$name", name);
 			command.Parameters.AddWithValue("$lea", (int)LeadershipSpinBox.Value);
-			command.Parameters.AddWithValue("$str", (int)StrategySpinBox.Value);
-			command.Parameters.AddWithValue("$com", (int)CombatSpinBox.Value);
+			command.Parameters.AddWithValue("$int", (int)IntelligenceSpinBox.Value);
+			command.Parameters.AddWithValue("$str", (int)StrengthSpinBox.Value);
 			command.Parameters.AddWithValue("$pol", (int)PoliticsSpinBox.Value);
+			command.Parameters.AddWithValue("$cha", (int)CharismaSpinBox.Value);
 
 			command.ExecuteNonQuery();
 

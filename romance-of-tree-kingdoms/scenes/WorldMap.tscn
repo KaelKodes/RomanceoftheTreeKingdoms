@@ -1,8 +1,140 @@
-[gd_scene load_steps=2 format=3 uid="uid://dwugi78t27gm6"]
+[gd_scene load_steps=5 format=3 uid="uid://dwugi78t27gm6"]
 
 [ext_resource type="Script" uid="uid://hp4jvkoapyjc" path="res://scripts/ui/WorldMap.cs" id="1_ej7nn"]
+[ext_resource type="PackedScene" uid="uid://ddm416ose46sn" path="res://scenes/GameHUD.tscn" id="2_gamehud"]
+[ext_resource type="PackedScene" uid="uid://bg5jcwfwgwffq" path="res://scenes/CityMenu.tscn" id="3_citymenu"]
+[ext_resource type="PackedScene" uid="uid://cegg47gwprlmd" path="res://scenes/OfficerCard.tscn" id="4_officercard"]
 
-[node name="WorldMap" type="Control"]
+[node name="WorldMap" type="Control" node_paths=PackedStringArray("CityContainer", "HUD", "CityMenuDialog", "OfficerCardDialog")]
 layout_mode = 3
-anchors_preset = 0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 script = ExtResource("1_ej7nn")
+CityContainer = NodePath("CityContainer")
+HUD = NodePath("UI_Layer/GameHUD")
+CityMenuDialog = NodePath("UI_Layer/CityMenu")
+OfficerCardDialog = NodePath("UI_Layer/OfficerCard")
+
+[node name="UI_Layer" type="CanvasLayer" parent="."]
+
+[node name="GameHUD" parent="UI_Layer" instance=ExtResource("2_gamehud")]
+offset_left = 9.0
+offset_top = 5.0
+offset_right = 9.0
+offset_bottom = 5.0
+mouse_filter = 2
+
+[node name="CityMenu" parent="UI_Layer" instance=ExtResource("3_citymenu")]
+custom_minimum_size = Vector2(250, 0)
+anchors_preset = -1
+anchor_left = 0.83000004
+anchor_right = 0.83000004
+anchor_bottom = 0.0
+offset_left = -95.160034
+offset_top = -11.0
+offset_right = 188.83997
+offset_bottom = 648.0
+grow_horizontal = 0
+grow_vertical = 1
+size_flags_horizontal = 8
+size_flags_vertical = 0
+
+[node name="OfficerCard" parent="UI_Layer" instance=ExtResource("4_officercard")]
+
+[node name="CityContainer" type="Control" parent="."]
+anchors_preset = 0
+offset_left = -43.0
+offset_top = -28.0
+offset_right = -3.0
+offset_bottom = 12.0
+
+[node name="CityContainer#Sun Capital" type="Button" parent="CityContainer"]
+layout_mode = 0
+offset_left = 613.0
+offset_top = 284.0
+offset_right = 709.0
+offset_bottom = 324.0
+text = "Sun Capital"
+
+[node name="CityContainer#Ironhold" type="Button" parent="CityContainer"]
+layout_mode = 0
+offset_left = 577.0
+offset_top = 39.0
+offset_right = 657.0
+offset_bottom = 79.0
+text = "Ironhold"
+
+[node name="CityContainer#Eldershade" type="Button" parent="CityContainer"]
+layout_mode = 0
+offset_left = 630.0
+offset_top = 537.0
+offset_right = 724.0
+offset_bottom = 577.0
+text = "Eldershade"
+
+[node name="CityContainer#Tiger Gate" type="Button" parent="CityContainer"]
+layout_mode = 0
+offset_left = 606.0
+offset_top = 177.0
+offset_right = 694.0
+offset_bottom = 217.0
+text = "Tiger Gate"
+
+[node name="CityContainer#River Port" type="Button" parent="CityContainer"]
+layout_mode = 0
+offset_left = 718.0
+offset_top = 406.0
+offset_right = 803.0
+offset_bottom = 446.0
+text = "River Port"
+
+[node name="CityContainer#Twin Peaks" type="Button" parent="CityContainer"]
+layout_mode = 0
+offset_left = 394.0
+offset_top = 117.0
+offset_right = 489.0
+offset_bottom = 157.0
+text = "Twin Peaks"
+
+[node name="CityContainer#Central Plains" type="Button" parent="CityContainer"]
+layout_mode = 0
+offset_left = 426.0
+offset_top = 280.0
+offset_right = 541.0
+offset_bottom = 320.0
+text = "Central Plains"
+
+[node name="CityContainer#West Hills" type="Button" parent="CityContainer"]
+layout_mode = 0
+offset_left = 285.0
+offset_top = 237.0
+offset_right = 369.0
+offset_bottom = 277.0
+text = "West Hills"
+
+[node name="CityContainer#Eastern Bay" type="Button" parent="CityContainer"]
+layout_mode = 0
+offset_left = 807.0
+offset_top = 305.0
+offset_right = 907.0
+offset_bottom = 345.0
+text = "Eastern Bay"
+
+[node name="CityContainer#Mistwood" type="Button" parent="CityContainer"]
+layout_mode = 0
+offset_left = 534.0
+offset_top = 412.0
+offset_right = 618.0
+offset_bottom = 452.0
+text = "Mistwood"
+
+[node name="CityContainer#South Fields" type="Button" parent="CityContainer"]
+layout_mode = 0
+offset_left = 444.0
+offset_top = 619.0
+offset_right = 546.0
+offset_bottom = 659.0
+text = "South Fields"

@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://7v6nya1ntbsq" path="res://scripts/ui/CharacterCreation.cs" id="1_r13d2"]
 
-[node name="CharacterCreation" type="Control" node_paths=PackedStringArray("NameInput", "LeadershipSpinBox", "StrategySpinBox", "CombatSpinBox", "PoliticsSpinBox", "PointsLeftSpinBox")]
+[node name="CharacterCreation" type="Control" node_paths=PackedStringArray("NameInput", "LeadershipSpinBox", "IntelligenceSpinBox", "StrengthSpinBox", "PoliticsSpinBox", "CharismaSpinBox", "PointsLeftSpinBox")]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -12,9 +12,10 @@ grow_vertical = 2
 script = ExtResource("1_r13d2")
 NameInput = NodePath("CreationControl/VBoxContainer/LineEdit")
 LeadershipSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/LeadershipSpinBox")
-StrategySpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/StrategySpinBox")
-CombatSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/CombatSpinBox")
+IntelligenceSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/IntelligenceSpinBox")
+StrengthSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/StrengthSpinBox")
 PoliticsSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/PoliticsSpinBox")
+CharismaSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/CharismaSpinBox")
 PointsLeftSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/PointsLeftSpinBox")
 
 [node name="ButtonControl" type="MarginContainer" parent="."]
@@ -77,35 +78,53 @@ alignment = 1
 layout_mode = 2
 columns = 2
 
+[node name="StrengthLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
+layout_mode = 2
+tooltip_text = "Strength directly boosts the damage dealt by your unit in combat and improves your efficiency when patrolling."
+mouse_filter = 0
+text = "Strength: "
+
+[node name="StrengthSpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
+layout_mode = 2
+alignment = 1
+
 [node name="LeadershipLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
+tooltip_text = "High Leadership increases the defense of the city you govern and determines your ability to lead large armies effectively."
+mouse_filter = 0
 text = "Leadership: "
 
 [node name="LeadershipSpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
 alignment = 1
 
-[node name="StrategyLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
+[node name="IntelligenceLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
-text = "Strategy: "
+tooltip_text = "Intelligence governs the speed of technology research and aids in spotting enemy schemes."
+mouse_filter = 0
+text = "Intelligence: "
 
-[node name="StrategySpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
-layout_mode = 2
-alignment = 1
-
-[node name="CombatLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
-layout_mode = 2
-text = "Combat: "
-
-[node name="CombatSpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
+[node name="IntelligenceSpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
 alignment = 1
 
 [node name="PoliticsLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
+tooltip_text = "A high Politics stat drastically improves gold commerce and agricultural food production."
+mouse_filter = 0
 text = "Politics:"
 
 [node name="PoliticsSpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="CharismaLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
+layout_mode = 2
+tooltip_text = "key to recruiting powerful officers to your cause and succeeding in high-stakes diplomatic negotiation"
+mouse_filter = 0
+text = "Charisma:"
+
+[node name="CharismaSpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
 alignment = 1
 

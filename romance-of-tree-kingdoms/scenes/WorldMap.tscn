@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3 uid="uid://dwugi78t27gm6"]
+
+[ext_resource type="Script" uid="uid://hp4jvkoapyjc" path="res://scripts/ui/WorldMap.cs" id="1_ej7nn"]
+
+[node name="WorldMap" type="Control"]
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1_ej7nn")

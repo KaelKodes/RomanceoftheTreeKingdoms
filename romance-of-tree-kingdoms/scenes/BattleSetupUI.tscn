@@ -1,0 +1,68 @@
+[gd_scene load_steps=2 format=3 uid="uid://dhfrj1h0dh64w"]
+
+[ext_resource type="Script" uid="uid://ci4x2hgwimyv5" path="res://scripts/ui/BattleSetupUI.cs" id="1_6ew7h"]
+
+[node name="BattleSetupUI" type="Control"]
+layout_mode = 3
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_6ew7h")
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 0
+offset_right = 143.0
+offset_bottom = 147.0
+
+[node name="Panel" type="Panel" parent="MarginContainer"]
+layout_mode = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Title"
+horizontal_alignment = 1
+
+[node name="ObjectiveLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Objective:"
+horizontal_alignment = 1
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="AttackersContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/HBoxContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="ListLabel" type="Label" parent="MarginContainer/VBoxContainer/HBoxContainer/AttackersContainer"]
+layout_mode = 2
+text = "Attacker"
+
+[node name="JoinButton" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer/AttackersContainer"]
+layout_mode = 2
+text = "Join"
+
+[node name="DefendersContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/HBoxContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="ListLabel" type="Label" parent="MarginContainer/VBoxContainer/HBoxContainer/DefendersContainer"]
+layout_mode = 2
+text = "Defender"
+
+[node name="JoinButton" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer/DefendersContainer"]
+layout_mode = 2
+text = "Join"
+
+[node name="StartButton" type="Button" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Start"

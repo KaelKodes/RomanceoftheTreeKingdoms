@@ -1,0 +1,31 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Romance of Tree Kingdoms"
+run/main_scene="uid://dw1tmf08w5gw2"
+config/features=PackedStringArray("4.5", "C#", "Forward Plus")
+config/icon="res://icon.svg"
+
+[autoload]
+
+ActionManager="*res://scripts/logic/ActionManager.cs"
+DiplomacyManager="*res://scripts/logic/DiplomacyManager.cs"
+TurnManager="*res://scripts/logic/TurnManager.cs"
+FactionAI="*res://scripts/logic/FactionAI.cs"
+RelationshipManager="*res://scripts/logic/RelationshipManager.cs"
+RoninAI="*res://scripts/logic/RoninAI.cs"
+BattleManager="*res://scripts/logic/BattleManager.cs"
+DatabaseClient="*res://scripts/core/DatabaseClient.cs"
+
+[dotnet]
+
+project/assembly_name="Romance of Tree Kingdoms"

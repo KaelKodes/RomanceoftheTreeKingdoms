@@ -1,0 +1,141 @@
+[gd_scene load_steps=7 format=3 uid="uid://j1623b21gxnv"]
+
+[ext_resource type="Script" uid="uid://dymfkak8xgwkr" path="res://scripts/logic/BattleController.cs" id="1_aai06"]
+[ext_resource type="Script" uid="uid://csfdwcpcxbrb2" path="res://scripts/ui/BattleGrid.cs" id="2_g3awa"]
+[ext_resource type="Texture2D" uid="uid://dq85ty2203uhl" path="res://icon.svg" id="2_yvd20"]
+[ext_resource type="Script" uid="uid://dpl1or1pylm" path="res://scripts/logic/BattleCamera.cs" id="4_yvd20"]
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_ap4nd"]
+texture = ExtResource("2_yvd20")
+0:0/0 = 0
+1:0/0 = 0
+2:0/0 = 0
+3:0/0 = 0
+4:0/0 = 0
+5:0/0 = 0
+6:0/0 = 0
+7:0/0 = 0
+0:1/0 = 0
+1:1/0 = 0
+2:1/0 = 0
+3:1/0 = 0
+4:1/0 = 0
+5:1/0 = 0
+6:1/0 = 0
+7:1/0 = 0
+0:2/0 = 0
+1:2/0 = 0
+2:2/0 = 0
+3:2/0 = 0
+4:2/0 = 0
+5:2/0 = 0
+6:2/0 = 0
+7:2/0 = 0
+0:3/0 = 0
+1:3/0 = 0
+2:3/0 = 0
+3:3/0 = 0
+4:3/0 = 0
+5:3/0 = 0
+6:3/0 = 0
+7:3/0 = 0
+0:4/0 = 0
+1:4/0 = 0
+2:4/0 = 0
+3:4/0 = 0
+4:4/0 = 0
+5:4/0 = 0
+6:4/0 = 0
+7:4/0 = 0
+0:5/0 = 0
+1:5/0 = 0
+2:5/0 = 0
+3:5/0 = 0
+4:5/0 = 0
+5:5/0 = 0
+6:5/0 = 0
+7:5/0 = 0
+0:6/0 = 0
+1:6/0 = 0
+2:6/0 = 0
+3:6/0 = 0
+4:6/0 = 0
+5:6/0 = 0
+6:6/0 = 0
+7:6/0 = 0
+0:7/0 = 0
+1:7/0 = 0
+2:7/0 = 0
+3:7/0 = 0
+4:7/0 = 0
+5:7/0 = 0
+6:7/0 = 0
+7:7/0 = 0
+
+[sub_resource type="TileSet" id="TileSet_6tp3h"]
+sources/0 = SubResource("TileSetAtlasSource_ap4nd")
+
+[node name="BattleMap" type="Node2D"]
+script = ExtResource("1_aai06")
+
+[node name="TileMap" type="TileMap" parent="."]
+tile_set = SubResource("TileSet_6tp3h")
+format = 2
+script = ExtResource("2_g3awa")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(255, 144)
+script = ExtResource("4_yvd20")
+
+[node name="Container" type="MarginContainer" parent="."]
+anchors_preset = 6
+anchor_left = 1.0
+anchor_top = 0.5
+anchor_right = 1.0
+anchor_bottom = 0.5
+offset_left = 251.0
+offset_top = -32.5
+offset_right = 480.0
+offset_bottom = -1.5
+grow_horizontal = 0
+grow_vertical = 2
+size_flags_horizontal = 8
+
+[node name="HBoxContainer" type="HBoxContainer" parent="Container"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 8
+size_flags_vertical = 0
+focus_behavior_recursive = 1
+
+[node name="-2xButton" type="Button" parent="Container/HBoxContainer"]
+layout_mode = 2
+text = "- 2x"
+
+[node name="-1xButton" type="Button" parent="Container/HBoxContainer"]
+layout_mode = 2
+text = "-1x"
+
+[node name="PlayPauseButton" type="Button" parent="Container/HBoxContainer"]
+layout_mode = 2
+text = "Play"
+
+[node name="1xButton" type="Button" parent="Container/HBoxContainer"]
+layout_mode = 2
+text = "1x"
+
+[node name="2xButton" type="Button" parent="Container/HBoxContainer"]
+layout_mode = 2
+text = "2x"
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+offset_left = 143.0
+offset_top = 122.0
+offset_right = 384.0
+offset_bottom = 162.0
+
+[node name="EndingLabel" type="Label" parent="MarginContainer"]
+visible = false
+layout_mode = 2
+theme_override_font_sizes/font_size = 27
+text = "VICTORY MESSAGE"

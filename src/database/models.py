@@ -1,0 +1,181 @@
+from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, Enum as SqEnum
+from sqlalchemy.orm import relationship, declarative_base
+import enum
+
+Base = declarative_base()
+
+# Enums
+class UnitRole(enum.Enum):
+    FRONTLINE = "Frontline"
+    RANGED = "Ranged"
+    SUPPORT = "Support"
+    CAVALRY = "Cavalry"
+    LOGISTICS = "Logistics"
+
+class Faction(Base):
+    __tablename__ = 'factions'
+    
+    faction_id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    color = Column(String) # Hex code or name
+    ideology = Column(String)
+    is_player = Column(Boolean, default=False)
+    
+    # Relationships
+    officers = relationship("Officer", back_populates="faction")
+    cities = relationship("City", back_populates="faction")
+
+class UnitType(Base):
+    __tablename__ = 'unit_types'
+    
+    unit_type_id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    role = Column(SqEnum(UnitRole), nullable=False)
+    is_default = Column(Boolean, default=False) # Is this the default unit for the role?
+    
+    # Stats (from spreadsheet Unit Stats)
+    base_health = Column(Float, default=100.0)
+    base_attack = Column(Float, default=10.0)
+    base_defense = Column(Float, default=0.0)
+    base_speed = Column(Float, default=1.0)
+    base_mana = Column(Float, default=0.0)
+    
+    # Costs
+    recruit_cost = Column(Float, default=10.0)
+    upkeep_cost = Column(Float, default=1.0)
+    
+    description = Column(String)
+
+class Officer(Base):
+    __tablename__ = 'officers'
+    
+    officer_id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    faction_id = Column(Integer, ForeignKey('factions.faction_id'), nullable=True) # Can be Ronin (None)
+    location_id = Column(Integer, ForeignKey('cities.city_id'), nullable=True)
+    
+    # Flags
+    is_player = Column(Boolean, default=False)
+    is_commander = Column(Boolean, default=False) # Is a Faction Leader?
+    
+    # Navigation
+    destination_city_id = Column(Integer, ForeignKey('cities.city_id'), nullable=True) # For multi-day travel
+    
+    # Attributes
+    leadership = Column(Integer, default=50)
+    strategy = Column(Integer, default=50)
+    combat = Column(Integer, default=50)
+    politics = Column(Integer, default=50)
+    
+    # Progression
+    rank = Column(Integer, default=1) # 1-10? Determines Action Points
+    reputation = Column(Integer, default=0) # Global karma
+    current_action_points = Column(Integer, default=3) # Refreshed daily
+    
+    # Relationships
+    faction = relationship("Faction", back_populates="officers")
+    current_city = relationship("City", back_populates="officers", foreign_keys=[location_id])
+
+class GameState(Base):
+    __tablename__ = 'game_state'
+    
+    save_id = Column(Integer, primary_key=True)
+    current_day = Column(Integer, default=1)
+    player_id = Column(Integer, ForeignKey('officers.officer_id'))
+    
+    # Could store global world flags here
+
+
+class City(Base):
+    __tablename__ = 'cities'
+    
+    city_id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    faction_id = Column(Integer, ForeignKey('factions.faction_id'))
+    
+    # Stats
+    economic_value = Column(Integer, default=100)
+    strategic_value = Column(Integer, default=100)
+    strategic_value = Column(Integer, default=100)
+    defense_level = Column(Integer, default=1)
+    
+    # Conquest Logic
+    is_hq = Column(Integer, default=0) # 0 = False, 1 = True
+    decay_turns = Column(Integer, default=0)
+    
+    # Relationships
+    faction = relationship("Faction", back_populates="cities")
+    officers = relationship("Officer", back_populates="current_city", foreign_keys="[Officer.location_id]")
+    
+    # Routes (Outgoing)
+    routes = relationship("Route", foreign_keys="[Route.start_city_id]", back_populates="start_city")
+
+class Route(Base):
+    __tablename__ = 'routes'
+    
+    route_id = Column(Integer, primary_key=True)
+    start_city_id = Column(Integer, ForeignKey('cities.city_id'), nullable=False)
+    end_city_id = Column(Integer, ForeignKey('cities.city_id'), nullable=False)
+    
+    # Route Stats
+    distance = Column(Float, default=1.0) # Days to travel
+    route_type = Column(String, default="Road") # Road, River, Mountain Pass
+    is_chokepoint = Column(Boolean, default=False)
+    
+    # Relationships
+    start_city = relationship("City", foreign_keys=[start_city_id], back_populates="routes")
+    end_city = relationship("City", foreign_keys=[end_city_id])
+
+class BattleMapTemplate(Base):
+    __tablename__ = 'battle_map_templates'
+    
+    template_id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    terrain_type = Column(String) # Plains, Forest, City
+    map_type = Column(String) # Open Field, Siege, Ambush
+    
+    nodes = relationship("BattleNodeTemplate", back_populates="map_template")
+    links = relationship("BattleLinkTemplate", back_populates="map_template")
+
+class BattleNodeTemplate(Base):
+    __tablename__ = 'battle_node_templates'
+    
+    node_id = Column(Integer, primary_key=True)
+    template_id = Column(Integer, ForeignKey('battle_map_templates.template_id'))
+    
+    name = Column(String)
+    x = Column(Float)
+    y = Column(Float)
+    node_type = Column(String, default="Standard") # HQ, Depot, Tower, Standard
+    
+    # Spawn Logic
+    is_attacker_spawn = Column(Boolean, default=False)
+    is_defender_spawn = Column(Boolean, default=False)
+    
+    map_template = relationship("BattleMapTemplate", back_populates="nodes")
+
+class BattleLinkTemplate(Base):
+    __tablename__ = 'battle_link_templates'
+    
+    link_id = Column(Integer, primary_key=True)
+    template_id = Column(Integer, ForeignKey('battle_map_templates.template_id'))
+    source_node_id = Column(Integer, ForeignKey('battle_node_templates.node_id'))
+    target_node_id = Column(Integer, ForeignKey('battle_node_templates.node_id'))
+    
+    distance = Column(Float, default=1.0)
+    
+    map_template = relationship("BattleMapTemplate", back_populates="links")
+
+class FactionRelation(Base):
+    __tablename__ = 'faction_relations'
+    
+    relation_id = Column(Integer, primary_key=True)
+    source_faction_id = Column(Integer, ForeignKey('factions.faction_id'), nullable=False)
+    target_faction_id = Column(Integer, ForeignKey('factions.faction_id'), nullable=False)
+    
+    # -100 (Total War) to 100 (Absolute Ally)
+    value = Column(Integer, default=0)
+    
+    # Relationships (Optional, for navigation if needed)
+    source_faction = relationship("Faction", foreign_keys=[source_faction_id])
+    target_faction = relationship("Faction", foreign_keys=[target_faction_id])

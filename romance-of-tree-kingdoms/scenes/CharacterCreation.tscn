@@ -1,0 +1,121 @@
+[gd_scene load_steps=2 format=3 uid="uid://jo36h7kwm4uq"]
+
+[ext_resource type="Script" uid="uid://7v6nya1ntbsq" path="res://scripts/ui/CharacterCreation.cs" id="1_r13d2"]
+
+[node name="CharacterCreation" type="Control" node_paths=PackedStringArray("NameInput", "LeadershipSpinBox", "StrategySpinBox", "CombatSpinBox", "PoliticsSpinBox", "PointsLeftSpinBox")]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_r13d2")
+NameInput = NodePath("CreationControl/VBoxContainer/LineEdit")
+LeadershipSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/LeadershipSpinBox")
+StrategySpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/StrategySpinBox")
+CombatSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/CombatSpinBox")
+PoliticsSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/PoliticsSpinBox")
+PointsLeftSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/PointsLeftSpinBox")
+
+[node name="ButtonControl" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -86.0
+offset_top = -40.0
+offset_right = 86.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="HBoxContainer" type="HBoxContainer" parent="ButtonControl"]
+layout_mode = 2
+size_flags_vertical = 0
+
+[node name="ConfirmButton" type="Button" parent="ButtonControl/HBoxContainer"]
+layout_mode = 2
+text = "Confirm"
+
+[node name="ResetButton" type="Button" parent="ButtonControl/HBoxContainer"]
+layout_mode = 2
+text = "Reset"
+
+[node name="QuitButton" type="Button" parent="ButtonControl/HBoxContainer"]
+layout_mode = 2
+text = "Quit"
+
+[node name="CreationControl" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -92.5
+offset_top = -116.5
+offset_right = 92.5
+offset_bottom = 116.5
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CreationControl"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="CreationControl/VBoxContainer"]
+layout_mode = 2
+text = "Characters Name:"
+horizontal_alignment = 1
+
+[node name="LineEdit" type="LineEdit" parent="CreationControl/VBoxContainer"]
+layout_mode = 2
+placeholder_text = "..."
+alignment = 1
+
+[node name="GridContainer" type="GridContainer" parent="CreationControl/VBoxContainer"]
+layout_mode = 2
+columns = 2
+
+[node name="LeadershipLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
+layout_mode = 2
+text = "Leadership: "
+
+[node name="LeadershipSpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="StrategyLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
+layout_mode = 2
+text = "Strategy: "
+
+[node name="StrategySpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="CombatLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
+layout_mode = 2
+text = "Combat: "
+
+[node name="CombatSpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="PoliticsLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
+layout_mode = 2
+text = "Politics:"
+
+[node name="PoliticsSpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
+layout_mode = 2
+alignment = 1
+
+[node name="PointsLeftLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
+layout_mode = 2
+text = "Remaining:"
+
+[node name="PointsLeftSpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
+layout_mode = 2
+alignment = 1
+editable = false
+
+[connection signal="pressed" from="ButtonControl/HBoxContainer/ConfirmButton" to="." method="OnConfirmPressed"]

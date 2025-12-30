@@ -110,6 +110,17 @@ public partial class BattleController : Node2D
 	private async void EndBattle(bool attackersWon)
 	{
 		_battleEnded = true;
+
+		// 1. Sync HP back to Troops for literal persistence
+		foreach (var unit in _units)
+		{
+			if (unit.OfficerData != null)
+			{
+				unit.OfficerData.Troops = Math.Max(0, unit.CurrentHP);
+				GD.Print($"[Battle] {unit.OfficerData.Name} ends with {unit.OfficerData.Troops} troops.");
+			}
+		}
+
 		string winner = attackersWon ? "Attackers" : "Defenders";
 		GD.Print($"Battle Over! {winner} Victory!");
 
@@ -200,10 +211,12 @@ public partial class BattleController : Node2D
 		var ctx = _battleManager.CurrentContext;
 		if (ctx == null) return;
 
-		GD.Print($"Starting Real-Time Battle for {ctx.CityName}!");
+		GD.Print($"Starting Real-Time Battle for {ctx.CityName} (Def: {ctx.CityDefense})!");
 
-		// Generate CP Map
-		_controlPoints = _grid.GenerateMapWithCPs(ctx.DefenderFactionId, ctx.AttackerFactionId);
+		// Generate CP Map (Siege Mode)
+		// Check if Siege: City Battle (Location > 0) is inherently a siege in this engine for now
+		// We can check if CityDefense > 0 or just always use SiegeMap for consistency in City Battles
+		_controlPoints = _grid.GenerateSiegeMap(ctx.DefenderFactionId, ctx.AttackerFactionId, ctx.CityDefense);
 
 		// Refresh CP Visuals based on Player Context (so Blue points show as Blue)
 		// Assuming Player Faction is known or we deduce from Attacker/Defender roles
@@ -220,7 +233,11 @@ public partial class BattleController : Node2D
 
 		SpawnUnits(ctx, _controlPoints);
 
-		// Initial Orders (Dumb AI)
+		// --- NEW AI ORDERS ---
+		var gate = _controlPoints.FirstOrDefault(c => c.Type == ControlPoint.CPType.Gate);
+		var attHQ = _controlPoints.FirstOrDefault(c => c.Type == ControlPoint.CPType.HQ && c.OwnerFactionId == ctx.AttackerFactionId);
+		var defHQ = _controlPoints.FirstOrDefault(c => c.Type == ControlPoint.CPType.HQ && c.OwnerFactionId == ctx.DefenderFactionId);
+
 		foreach (var u in _units)
 		{
 			if (u.OfficerData.IsPlayer)
@@ -229,11 +246,40 @@ public partial class BattleController : Node2D
 				continue; // Player waits for input
 			}
 
-			// Simple AI: Charge the other side (For now, just Focus on Enemy HQ)
-			var enemyHQ = _controlPoints.FirstOrDefault(c => c.Type == ControlPoint.CPType.HQ && c.OwnerFactionId != (u.IsDefender ? ctx.DefenderFactionId : ctx.AttackerFactionId));
-
-			if (enemyHQ != null)
-				u.SetFocus(enemyHQ.GridPosition, _grid);
+			if (u.IsDefender)
+			{
+				// DEFENDER LOGIC: Forward Defense
+				// Position in front of the Gate (towards Attacker HQ)
+				if (gate != null && !gate.IsDestroyed)
+				{
+					// Move to Gate Position + Offset towards Attackers
+					// Attacker HQ is at X ~ 27, Gate at X ~ 10. Defenders should be at X ~ 12-14.
+					// Simple logic: Target Gate, but stop short? Or Target point in front?
+					// Let's set target to Gate for now, but UnitAI will need to know to "Defend" it.
+					// For now, let's target the Attacker HQ but stop at the Gate?
+					// BETTER: Target the GATE. UnitController "Defend" state will handle positioning.
+					u.SetFocus(gate.GridPosition, _grid);
+				}
+				else
+				{
+					// Fallback: Charge
+					if (attHQ != null) u.SetFocus(attHQ.GridPosition, _grid);
+				}
+			}
+			else
+			{
+				// ATTACKER LOGIC: Siege Breaker
+				// Target Gate first
+				if (gate != null && !gate.IsDestroyed)
+				{
+					u.SetFocus(gate.GridPosition, _grid);
+				}
+				else
+				{
+					// Target HQ
+					if (defHQ != null) u.SetFocus(defHQ.GridPosition, _grid);
+				}
+			}
 		}
 	}
 

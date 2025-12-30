@@ -124,9 +124,9 @@ public partial class CharacterCreation : Control
 			// 3. Insert Player
 			var command = connection.CreateCommand();
 			command.CommandText =
-			@"
-                INSERT INTO officers (name, leadership, intelligence, strength, politics, charisma, faction_id, location_id, is_player, rank, reputation, current_action_points, troops, max_troops)
-                VALUES ($name, $lea, $int, $str, $pol, $cha, NULL, 1, 1, 'Volunteer', 0, 3, 250, 250);
+            @"
+                INSERT INTO officers (name, leadership, intelligence, strength, politics, charisma, faction_id, location_id, is_player, rank, reputation, current_action_points, max_action_points, troops, max_troops)
+                VALUES ($name, $lea, $int, $str, $pol, $cha, NULL, 1, 1, 'Volunteer', 0, 3, 3, 100, 100);
                 
                 INSERT INTO game_state (current_day, player_id) VALUES (1, last_insert_rowid());
 			";

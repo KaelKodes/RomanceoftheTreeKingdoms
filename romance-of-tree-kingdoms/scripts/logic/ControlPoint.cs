@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 public partial class ControlPoint : Node2D
 {
-	public enum CPType { HQ, SupplyDepot, Outpost }
+	public enum CPType { HQ, SupplyDepot, Outpost, Gate }
 
 	public CPType Type { get; private set; }
 	public int OwnerFactionId { get; private set; } // 0 = Neutral
@@ -40,6 +40,13 @@ public partial class ControlPoint : Node2D
 		UpdateVisuals(); // Refresh to show new type icon
 	}
 
+	// Set MaxHP specific for Siege Walls
+	public void SetMaxHealth(int hp)
+	{
+		MaxHealth = hp;
+		CurrentHealth = hp;
+	}
+
 	// isAllyRef: 0=Unknown/Neutral, 1=Ally, -1=Enemy. If 0, uses internal logic.
 	public void UpdateVisuals(int allyStatus = 0)
 	{
@@ -68,6 +75,7 @@ public partial class ControlPoint : Node2D
 				case CPType.HQ: typeStr = "HQ"; break;
 				case CPType.SupplyDepot: typeStr = "Supply"; break;
 				case CPType.Outpost: typeStr = "OP"; break;
+				case CPType.Gate: typeStr = "OP"; break; // Needs a graphic, fallback to OP if missing or use code
 			}
 			filename = $"{color}{typeStr}.png";
 		}

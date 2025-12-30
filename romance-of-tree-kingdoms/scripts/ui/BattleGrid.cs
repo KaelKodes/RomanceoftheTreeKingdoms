@@ -89,6 +89,68 @@ public partial class BattleGrid : Node2D // Changed from TileMap
 		return cps;
 	}
 
+	public List<ControlPoint> GenerateSiegeMap(int defenderId, int attackerId, int defenseLevel)
+	{
+		GD.Print($"Generating Siege Map (Def: {defenseLevel})...");
+
+		// Reset
+		_terrainContainer.QueueFree();
+		_terrainContainer = new Node2D();
+		AddChild(_terrainContainer);
+		_grid = new int[MAP_WIDTH, MAP_HEIGHT];
+
+		var cps = new List<ControlPoint>();
+
+		// 1. Fill with Forest (Blocked)
+		for (int x = 0; x < MAP_WIDTH; x++)
+			for (int y = 0; y < MAP_HEIGHT; y++)
+				_grid[x, y] = TILE_FOREST;
+
+		// 2. Place HQs
+		var defHQ = CreateCP(new Vector2I(2, MAP_HEIGHT / 2), ControlPoint.CPType.HQ, defenderId);
+		cps.Add(defHQ);
+
+		var attHQ = CreateCP(new Vector2I(MAP_WIDTH - 3, MAP_HEIGHT / 2), ControlPoint.CPType.HQ, attackerId);
+		cps.Add(attHQ);
+
+		// 3. Place SIEGE WALL (Gate)
+		// Positioned at X = 10 (blocking attacker approach)
+		int wallX = 10;
+		var gate = CreateCP(new Vector2I(wallX, MAP_HEIGHT / 2), ControlPoint.CPType.Gate, defenderId);
+
+		// Scale HP based on Defense Level
+		int wallHP = 2000 + (defenseLevel * 10);
+		gate.SetMaxHealth(wallHP);
+		cps.Add(gate);
+
+		GD.Print($"Siege Wall Erected! HP: {wallHP}");
+
+		// 4. Carve Zones
+		// Zone Behind Wall (Defender Safe Zone)
+		CarveArea(defHQ.GridPosition, 6);
+
+		// Zone In Front of Wall (Attacker Zone)
+		CarveArea(attHQ.GridPosition, 8);
+
+		// Connect HQ -> Gate -> AttackerHQ
+		// But ensures the PATH goes through the gate tile
+		// We manually carve the "Gate" tile as walkable (Plains) so units can stand on it (when dead)
+		// Actually, CreateCP calls CarveArea.
+
+		// Connect Gate to HQs
+		gate.AddConnection(defHQ);
+		gate.AddConnection(attHQ);
+
+		// Ensure path connects them
+		CarvePath(defHQ.GridPosition, gate.GridPosition);
+		CarvePath(gate.GridPosition, attHQ.GridPosition);
+
+		// Render
+		RenderTerrain();
+
+		return cps;
+	}
+
 	private void RenderTerrain()
 	{
 		// Load Textures

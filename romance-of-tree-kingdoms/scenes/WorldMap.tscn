@@ -32,23 +32,19 @@ custom_minimum_size = Vector2(250, 0)
 anchors_preset = -1
 anchor_left = 0.83000004
 anchor_right = 0.83000004
-anchor_bottom = 0.0
-offset_left = -95.160034
+offset_left = -108.160034
 offset_top = -11.0
-offset_right = 188.83997
+offset_right = 175.83997
 offset_bottom = 648.0
-grow_horizontal = 0
-grow_vertical = 1
-size_flags_horizontal = 8
 size_flags_vertical = 0
 
 [node name="OfficerCard" parent="UI_Layer" instance=ExtResource("4_officercard")]
 
 [node name="CityContainer" type="Control" parent="."]
 anchors_preset = 0
-offset_left = -43.0
+offset_left = -56.0
 offset_top = -28.0
-offset_right = -3.0
+offset_right = -16.0
 offset_bottom = 12.0
 
 [node name="CityContainer#Sun Capital" type="Button" parent="CityContainer"]

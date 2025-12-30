@@ -1,6 +1,15 @@
 using Godot;
 using System.Collections.Generic;
 
+public enum UnitRole
+{
+    FRONTLINE,
+    RANGED,
+    SUPPORT,
+    CAVALRY,
+    LOGISTICS
+}
+
 public static class GameConstants
 {
     // Rank Names
@@ -12,11 +21,11 @@ public static class GameConstants
     public const string RANK_SOVEREIGN = "Sovereign";
 
     // Troop Limits
-    public const int TROOPS_VOLUNTEER = 250;
-    public const int TROOPS_REGULAR = 500;
-    public const int TROOPS_OFFICER = 1000;
-    public const int TROOPS_CAPTAIN = 4000;
-    public const int TROOPS_GENERAL = 5000;
+    public const int TROOPS_VOLUNTEER = 100;
+    public const int TROOPS_REGULAR = 250;
+    public const int TROOPS_OFFICER = 500;
+    public const int TROOPS_CAPTAIN = 1000;
+    public const int TROOPS_GENERAL = 3000;
     public const int TROOPS_SOVEREIGN = 5000;
 
     public static string GetRankTitle(int level)

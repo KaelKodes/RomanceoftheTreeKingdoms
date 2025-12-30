@@ -107,8 +107,7 @@ public partial class GameHUD : Control
 
     public void RefreshHUD()
     {
-        string dbPath = System.IO.Path.Combine(ProjectSettings.GlobalizePath("res://"), "../tree_kingdoms.db");
-        using (var connection = new SqliteConnection($"Data Source={dbPath}"))
+        using (var connection = DatabaseHelper.GetConnection())
         {
             connection.Open();
 
@@ -123,7 +122,9 @@ public partial class GameHUD : Control
                     o.battles_won, 
                     o.battles_lost,
                     o.gold,
-                    f.name as faction_name
+                    f.name as faction_name,
+                    o.max_action_points,
+                    o.troops
                 FROM officers o
                 LEFT JOIN factions f ON o.faction_id = f.faction_id
 				WHERE o.is_player = 1";
@@ -140,13 +141,16 @@ public partial class GameHUD : Control
                     int losses = r.IsDBNull(5) ? 0 : r.GetInt32(5);
                     int gold = r.IsDBNull(6) ? 0 : r.GetInt32(6); // Gold
                     string factionName = r.IsDBNull(7) ? "Ronin" : r.GetString(7);
+                    int maxAP = r.IsDBNull(8) ? 3 : r.GetInt32(8);
+                    int currentTroops = r.IsDBNull(9) ? 0 : r.GetInt32(9);
 
-                    _apLabel.Text = $"AP: {ap}/3";
+                    GD.Print($"[HUD Refresh] Rank: {rank}, Troops: {currentTroops}/{maxTroops}, Gold: {gold}, Rep: {rep}");
+
+                    _apLabel.Text = $"AP: {ap}/{maxAP}";
                     if (_goldLabel != null) _goldLabel.Text = $"Gold: {gold}";
                     _factionLabel.Text = $"Faction: {factionName}";
                     _rankLabel.Text = $"Rank: {rank} (Rep: {rep})";
-                    _rankLabel.Text = $"Rank: {rank} (Rep: {rep})";
-                    _troopsLabel.Text = $"Command: {maxTroops}";
+                    _troopsLabel.Text = $"Command: {currentTroops}/{maxTroops}";
                     if (_recordLabel != null) _recordLabel.Text = $"Record: {wins}W - {losses}L";
                 }
             }

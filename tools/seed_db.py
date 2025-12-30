@@ -32,43 +32,31 @@ def seed():
     # 3. Create Unit Types (Roles & Variants)
     print("  Creating Unit Types...")
     units = [
-        # Frontline
-        UnitType(name="Footman", role=UnitRole.FRONTLINE, is_default=True, 
-                 base_health=120, base_attack=15, base_defense=10, description="Standard infantry."),
-        UnitType(name="Paladin", role=UnitRole.FRONTLINE, is_default=False, 
-                 base_health=150, base_attack=20, base_defense=20, base_mana=50, description="Holy warrior."),
-        UnitType(name="Berserker", role=UnitRole.FRONTLINE, is_default=False, 
-                 base_health=100, base_attack=35, base_defense=5, description="High damage dealer."),
+        # Infantry Path
+        UnitType(name="Militia", role=UnitRole.FRONTLINE, is_default=True, 
+                 base_health=100, base_attack=10, base_defense=10, description="Basic conscripts."),
+        UnitType(name="Heavy Infantry", role=UnitRole.FRONTLINE, is_default=False, 
+                 base_health=140, base_attack=15, base_defense=25, description="Iron-clad footmen. Requires Tech 200."),
+        UnitType(name="Spear Guard", role=UnitRole.FRONTLINE, is_default=False, 
+                 base_health=160, base_attack=20, base_defense=30, description="Elite anti-cavalry. Requires Tech 500."),
         
-        # Ranged
+        # Ranged Path
         UnitType(name="Archer", role=UnitRole.RANGED, is_default=True,
-                 base_health=80, base_attack=12, base_defense=2, description="Standard ranged unit."),
-        UnitType(name="Fire Mage", role=UnitRole.RANGED, is_default=False,
-                 base_health=70, base_attack=25, base_defense=0, base_mana=100, description="AOE magic user."),
-        UnitType(name="Sniper", role=UnitRole.RANGED, is_default=False,
-                 base_health=80, base_attack=30, base_defense=2, description="High single target damage."),
+                 base_health=80, base_attack=12, base_defense=5, description="Standard bowmen."),
+        UnitType(name="Crossbowman", role=UnitRole.RANGED, is_default=False,
+                 base_health=90, base_attack=25, base_defense=10, description="Piercing damage. Requires Tech 400."),
                  
-        # Support
-        UnitType(name="Field Medic", role=UnitRole.SUPPORT, is_default=True,
-                 base_health=70, base_attack=5, base_defense=5, description="Heals nearby units."),
-        UnitType(name="Priest", role=UnitRole.SUPPORT, is_default=False,
-                 base_health=60, base_attack=5, base_defense=5, base_mana=100, description="Buffs and heals."),
-        UnitType(name="Druid", role=UnitRole.SUPPORT, is_default=False,
-                 base_health=80, base_attack=10, base_defense=10, base_mana=80, description="Terrain control."),
-
-        # Cavalry
-        UnitType(name="Light Rider", role=UnitRole.CAVALRY, is_default=True,
-                 base_health=110, base_attack=18, base_defense=8, base_speed=1.5, description="Fast scount/flanker."),
-        UnitType(name="Heavy Lancer", role=UnitRole.CAVALRY, is_default=False,
-                 base_health=140, base_attack=25, base_defense=15, base_speed=1.2, description="Shock cavalry."),
-        UnitType(name="Horse Archer", role=UnitRole.CAVALRY, is_default=False,
-                 base_health=90, base_attack=15, base_defense=5, base_speed=1.6, description="Mobile ranged."),
+        # Cavalry Path
+        UnitType(name="Scout Cavalry", role=UnitRole.CAVALRY, is_default=True,
+                 base_health=110, base_attack=18, base_defense=8, base_speed=1.5, description="Fast scouts."),
+        UnitType(name="Lancer Cavalry", role=UnitRole.CAVALRY, is_default=False,
+                 base_health=130, base_attack=25, base_defense=15, base_speed=1.3, description="Shock troops. Requires Tech 300."),
+        UnitType(name="Heavy Cavalry", role=UnitRole.CAVALRY, is_default=False,
+                 base_health=160, base_attack=30, base_defense=30, base_speed=1.1, description="Unstoppable force. Requires Tech 600."),
                  
         # Logistics
         UnitType(name="Supply Cart", role=UnitRole.LOGISTICS, is_default=True,
-                 base_health=50, base_attack=0, base_defense=0, description="Carries supplies."),
-        UnitType(name="Arcane Mule", role=UnitRole.LOGISTICS, is_default=False,
-                 base_health=60, base_attack=0, base_defense=5, base_mana=50, description="Self-sustaining logistics.")
+                 base_health=100, base_attack=0, base_defense=0, description="Carries army supplies.")
     ]
     session.add_all(units)
 
@@ -76,29 +64,29 @@ def seed():
     print("  Creating Hebei-Style Map...")
     cities = {}
     
-    def make_city(name, faction=None, econ=100, strat=100, defense=1):
-        c = City(name=name, faction=faction, economic_value=econ, strategic_value=strat, defense_level=defense)
+    def make_city(name, faction=None, ag=100, com=100, tech=50, defense=100):
+        c = City(name=name, faction=faction, agriculture=ag, commerce=com, technology=tech, defense_level=defense)
         session.add(c)
         session.flush() # Get ID
         cities[name] = c
         return c
 
     # HQs
-    c_capital = make_city("Sun Capital", loyalists, 300, 300, 4) 
-    c_ironhold = make_city("Ironhold", separatists, 150, 400, 5)  
-    c_eldershade = make_city("Eldershade", coalition, 200, 100, 2)  
+    c_capital = make_city("Sun Capital", loyalists, 400, 400, 150, 500) 
+    c_ironhold = make_city("Ironhold", separatists, 200, 200, 300, 600)  
+    c_eldershade = make_city("Eldershade", coalition, 300, 250, 100, 300)  
 
     # Key Locations
-    make_city("South Fields", coalition, 150, 80, 2) 
-    make_city("Tiger Gate", loyalists, 50, 250, 4) 
-    make_city("River Port", loyalists, 200, 150, 2) 
-    make_city("Twin Peaks", separatists, 80, 200, 3) 
+    make_city("South Fields", coalition, 400, 150, 100, 250) 
+    make_city("Tiger Gate", loyalists, 50, 100, 200, 800) 
+    make_city("River Port", loyalists, 200, 500, 150, 200) 
+    make_city("Twin Peaks", separatists, 100, 100, 100, 400) 
     
     # Neutral/Contested
-    make_city("Central Plains", None, 150, 50, 0)
-    make_city("West Hills", None, 80, 120, 1)
-    make_city("Eastern Bay", None, 120, 80, 1)
-    make_city("Mistwood", None, 60, 60, 0) 
+    make_city("Central Plains", None, 200, 200, 50, 100)
+    make_city("West Hills", None, 150, 100, 80, 200)
+    make_city("Eastern Bay", None, 180, 300, 100, 150)
+    make_city("Mistwood", None, 250, 100, 50, 100)
 
     session.commit()
 
@@ -143,7 +131,9 @@ def seed():
             rank="General",
             reputation=50,
             troops=5000,
-            max_troops=5000
+            max_troops=5000,
+            current_action_points=5,
+            max_action_points=5
         )
         officers.append(cmd)
         
@@ -160,8 +150,10 @@ def seed():
                 charisma=random.randint(30, 80),
                 rank="Regular",
                 reputation=10,
-                troops=1000,
-                max_troops=1000
+                troops=250,
+                max_troops=250,
+                current_action_points=3,
+                max_action_points=3
             )
             officers.append(sub)
 
@@ -180,8 +172,8 @@ def seed():
             charisma=random.randint(30, 80),
             rank="Volunteer",
             reputation=0,
-            troops=random.randint(100, 300),
-            max_troops=500
+            troops=100,
+            max_troops=100
         )
         if random.random() < 0.3: # 30% chance to be already in a faction
             no.faction = random.choice([loyalists, separatists, coalition])

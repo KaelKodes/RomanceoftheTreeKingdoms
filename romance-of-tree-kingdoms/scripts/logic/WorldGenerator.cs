@@ -72,11 +72,14 @@ public partial class WorldGenerator : Node
                     {
                         var cmd = conn.CreateCommand();
                         cmd.CommandText = @"
-                            INSERT INTO officers (name, leadership, intelligence, strength, politics, charisma, is_player, rank, reputation, troops, is_commander, max_troops) 
-                            VALUES ($name, $lea, $int, $str, $pol, $cha, 0, 'Volunteer', 0, 250, 0, 250);
+                            INSERT INTO officers (name, leadership, intelligence, strength, politics, charisma, is_player, rank, reputation, troops, is_commander, max_troops, max_action_points, current_action_points) 
+                            VALUES ($name, $lea, $int, $str, $pol, $cha, 0, $rnk, 0, $tr, 0, $mt, 3, 3);
                             SELECT last_insert_rowid();";
 
                         cmd.Parameters.AddWithValue("$name", name);
+                        cmd.Parameters.AddWithValue("$rnk", GameConstants.RANK_VOLUNTEER);
+                        cmd.Parameters.AddWithValue("$tr", GameConstants.TROOPS_VOLUNTEER);
+                        cmd.Parameters.AddWithValue("$mt", GameConstants.TROOPS_VOLUNTEER);
                         cmd.Parameters.AddWithValue("$lea", rng.Next(20, 75)); // Lower base, room for growth
                         cmd.Parameters.AddWithValue("$int", rng.Next(20, 75));
                         cmd.Parameters.AddWithValue("$str", rng.Next(20, 75));
@@ -106,7 +109,7 @@ public partial class WorldGenerator : Node
                         int lPol = rng.Next(75, 88);
                         int lCha = rng.Next(85, 95);
 
-                        ExecuteSql(conn, $"UPDATE officers SET leadership = {lLea}, intelligence = {lInt}, strength = {lStr}, politics = {lPol}, charisma = {lCha}, rank = 'Sovereign', troops = {GameConstants.TROOPS_SOVEREIGN}, max_troops = {GameConstants.TROOPS_SOVEREIGN}, faction_id = " + fid + " WHERE officer_id = " + lid);
+                        ExecuteSql(conn, $"UPDATE officers SET leadership = {lLea}, intelligence = {lInt}, strength = {lStr}, politics = {lPol}, charisma = {lCha}, rank = 'Sovereign', troops = {GameConstants.TROOPS_SOVEREIGN}, max_troops = {GameConstants.TROOPS_SOVEREIGN}, max_action_points = 5, current_action_points = 5, faction_id = " + fid + " WHERE officer_id = " + lid);
 
                         ExecuteSql(conn, "UPDATE factions SET leader_id = " + lid + " WHERE faction_id = " + fid);
 
@@ -150,16 +153,16 @@ public partial class WorldGenerator : Node
                     {
                         long fid = factionIds[i];
                         long hqId = hqs[i];
+                        long lid = leaders[i];
 
-                        // Set HQ Ownership
-                        ExecuteSql(conn, $"UPDATE cities SET faction_id = {fid}, is_hq = 1 WHERE city_id = {hqId}");
+                        // Set HQ Ownership - Faction Leader is the initial Governor
+                        ExecuteSql(conn, $"UPDATE cities SET faction_id = {fid}, is_hq = 1, governor_id = {lid} WHERE city_id = {hqId}");
 
                         // Move all Faction Members there
                         ExecuteSql(conn, $"UPDATE officers SET location_id = {hqId} WHERE faction_id = {fid}");
 
-                        // Set Leader as Commander (Simplest logic for now: Leader is Gov of HQ)
-                        long lid = leaders[i];
-                        ExecuteSql(conn, $"UPDATE officers SET is_commander = 1 WHERE officer_id = {lid}");
+                        // Set Leader as Commander (Sovereign)
+                        ExecuteSql(conn, $"UPDATE officers SET is_commander = 1, rank = '{GameConstants.RANK_SOVEREIGN}', max_troops = {GameConstants.TROOPS_SOVEREIGN}, troops = {GameConstants.TROOPS_SOVEREIGN}, max_action_points = 5, current_action_points = 5 WHERE officer_id = {lid}");
                     }
 
                     // 6. Free Agents Logic

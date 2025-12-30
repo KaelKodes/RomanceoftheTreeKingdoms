@@ -20,7 +20,7 @@ public partial class UnitController : Node2D
     public int Attack { get; private set; }
 
     // Real-Time Logic
-    public enum UnitState { Idle, Moving, Attacking, Cooldown }
+    public enum UnitState { Idle, Moving, Attacking, Cooldown, Siege, Retreat }
     public UnitState CurrentState { get; private set; } = UnitState.Idle;
 
     public Vector2I TargetGridPos { get; private set; }
@@ -127,9 +127,11 @@ public partial class UnitController : Node2D
         {
             case (int)UnitState.Idle:
             case (int)UnitState.Moving:
-                HandleMovement(delta, grid, allUnits);
+            case (int)UnitState.Retreat:
+                HandleMovement(delta, grid, allUnits, allCPs);
                 break;
             case (int)UnitState.Attacking:
+            case (int)UnitState.Siege:
                 // Animation logic would go here
                 break;
         }
@@ -140,9 +142,27 @@ public partial class UnitController : Node2D
             Position = Position.MoveToward(_visualTargetPos, _moveSpeed * delta);
         }
 
-        // 4. CP Capture Logic (MOVED TO BattleController for Majority Rule)
+        // 4. Retreat Logic
+        if (CurrentState != UnitState.Retreat && CurrentHP < MaxHP * 0.2f && CurrentHP > 0)
+        {
+            // Check morale/surroundings
+            // Simple: If low HP, retreat to HQ
+            // Find Friendly HQ
+            if (allCPs != null)
+            {
+                var hq = allCPs.FirstOrDefault(c => c.Type == ControlPoint.CPType.HQ && c.OwnerFactionId == (IsDefender ? OfficerData.FactionId : -999));
+                // Note: Attacker Faction ID handling might be tricky here, assume FactionId is correct or check IsDefender
+                // Simplified: Defender -> Defender HQ. Attacker -> Attacker HQ?
+				// Actually passing the faction ID context is better, but for now let's assume retreat to "Start"
+
+				// For simplicity: If Critical, Retreat away from enemies? Or just to start pos?
+				// Let's mark state RETREAT and set target to 0,0 or map edge?
+                CurrentState = UnitState.Retreat;
+                // Determine retreat target in HandleMovement or set here if we had access to HQ list easily
+            }
+        }
     }
-    private void HandleMovement(float delta, BattleGrid grid, List<UnitController> allUnits)
+    private void HandleMovement(float delta, BattleGrid grid, List<UnitController> allUnits, List<ControlPoint> allCPs)
     {
         // Are we at the visual target (Next Tile)?
         if (Position.DistanceTo(_visualTargetPos) <= 1.0f)
@@ -184,73 +204,122 @@ public partial class UnitController : Node2D
                 nextStep = GridPosition + direction;
             }
 
-            // Check Blockage
-            var blocker = allUnits.FirstOrDefault(u => u.GridPosition == nextStep && u.CurrentHP > 0);
-            if (blocker != null)
+            // Check Blockage (Units & Walls)
+            // 1. Check Siege Walls (Gates)
+            ControlPoint wall = null;
+            if (allCPs != null)
             {
-                // Blocked!
-                // If Enemy -> Attack!
-                if (blocker.IsDefender != IsDefender)
-                {
-                    TryAttack(blocker);
-                }
-                else
-                {
-                    // Friendly Block -> Wait (Idle)
-                    CurrentState = UnitState.Idle;
-                }
-            }
-            else if (grid.IsWalkable(nextStep))
-            {
-                // Move!
-                GridPosition = nextStep;
-                _visualTargetPos = grid.GridToWorld(nextStep);
-                CurrentState = UnitState.Moving;
-
-                // Consume Path Step
-                if (_currentPath != null && _currentPath.Count > 0 && _currentPath[0] == nextStep)
-                {
-                    _currentPath.RemoveAt(0);
-                }
-            }
-        }
-    }
-
-    private void TryAttack(UnitController target)
-    {
-        if (_attackCooldown <= 0)
-        {
-            CurrentState = UnitState.Attacking;
-
-            // Instant Hit for now
-            GD.Print($"{OfficerData.Name} hits {target.OfficerData.Name}!");
-            int damage = Math.Max(1, Attack / 5);
-
-            bool wasAlive = target.CurrentHP > 0;
-            target.TakeDamage(damage); // Lower dmg for realtime spam
-
-            if (wasAlive && target.CurrentHP <= 0)
-            {
-                // Target Killed!
-                int goldReward = target.OfficerData.Rank == "Minion" ? 25 : 200;
-                BattleManager.Instance?.AwardGold(OfficerData.OfficerId, goldReward);
+                wall = allCPs.FirstOrDefault(c => c.GridPosition == nextStep && c.Type == ControlPoint.CPType.Gate && !c.IsDestroyed);
             }
 
-            _attackCooldown = 1.0f / _attackSpeed;
-            CurrentState = UnitState.Cooldown;
-        }
-    }
+            if (wall != null)
+            {
+                // Wall Block!
+                // If Enemy Wall -> Siege!
+                bool isEnemyWall = (IsDefender && wall.OwnerFactionId != OfficerData.FactionId) || (!IsDefender && wall.OwnerFactionId != 0); // Simplified
+                                                                                                                                              // Better: Compare OwnerFactionId. If I am Defender (Faction A), Wall is Faction A -> Friendly.
 
-    public void TakeDamage(int amount)
-    {
-        CurrentHP -= amount;
-        if (CurrentHP < 0) CurrentHP = 0;
-        UpdateVisuals();
+				// Siege Logic: Attack if it's not mine
+				if (wall.OwnerFactionId != OfficerData.FactionId)
+				{
+					TryAttack(wall);
+				}
+				else
+				{
+					CurrentState = UnitState.Idle; // Wait behind friendly gate
+				}
+				return;
+			}
 
-        if (CurrentHP == 0)
-        {
-            GD.Print($"{OfficerData.Name} has been defeated!");
-            Modulate = new Color(0.5f, 0.5f, 0.5f, 0.5f); // Fade out
-        }
-    }
+			// 2. Check Units
+			var blocker = allUnits.FirstOrDefault(u => u.GridPosition == nextStep && u.CurrentHP > 0);
+			if (blocker != null)
+			{
+				// Blocked!
+				// If Enemy -> Attack!
+				if (blocker.IsDefender != IsDefender)
+				{
+					TryAttack(blocker);
+				}
+				else
+				{
+					// Friendly Block -> Wait (Idle)
+					CurrentState = UnitState.Idle;
+				}
+			}
+			else if (grid.IsWalkable(nextStep))
+			{
+				// Move!
+				GridPosition = nextStep;
+				_visualTargetPos = grid.GridToWorld(nextStep);
+				CurrentState = UnitState.Moving;
+
+				// Consume Path Step
+				if (_currentPath != null && _currentPath.Count > 0 && _currentPath[0] == nextStep)
+				{
+					_currentPath.RemoveAt(0);
+				}
+			}
+		}
+	}
+
+	private void TryAttack(UnitController target)
+	{
+		if (_attackCooldown <= 0)
+		{
+			CurrentState = UnitState.Attacking;
+
+			// Instant Hit for now
+			GD.Print($"{OfficerData.Name} hits {target.OfficerData.Name}!");
+			int damage = Math.Max(1, Attack / 5);
+
+			bool wasAlive = target.CurrentHP > 0;
+			target.TakeDamage(damage); // Lower dmg for realtime spam
+
+			if (wasAlive && target.CurrentHP <= 0)
+			{
+				// Target Killed!
+				int goldReward = target.OfficerData.Rank == "Minion" ? 25 : 200;
+				BattleManager.Instance?.AwardGold(OfficerData.OfficerId, goldReward);
+			}
+
+			_attackCooldown = 1.0f / _attackSpeed;
+			CurrentState = UnitState.Cooldown;
+		}
+	}
+
+	private void TryAttack(ControlPoint target)
+	{
+		if (_attackCooldown <= 0)
+		{
+			CurrentState = UnitState.Siege;
+
+			GD.Print($"{OfficerData.Name} bashes the Gate!");
+			int damage = Math.Max(1, Attack / 5);
+
+			target.TakeDamage(damage);
+
+			if (target.IsDestroyed)
+			{
+				GD.Print("The Gate has been breached!");
+				CurrentState = UnitState.Idle;
+			}
+
+			_attackCooldown = 1.0f / _attackSpeed;
+			CurrentState = UnitState.Cooldown;
+		}
+	}
+
+	public void TakeDamage(int amount)
+	{
+		CurrentHP -= amount;
+		if (CurrentHP < 0) CurrentHP = 0;
+		UpdateVisuals();
+
+		if (CurrentHP == 0)
+		{
+			GD.Print($"{OfficerData.Name} has been defeated!");
+			Modulate = new Color(0.5f, 0.5f, 0.5f, 0.5f); // Fade out
+		}
+	}
 }

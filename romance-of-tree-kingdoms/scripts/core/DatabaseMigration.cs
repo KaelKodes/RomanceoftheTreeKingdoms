@@ -64,6 +64,14 @@ public partial class DatabaseMigration
                 }
             }
 
+            // Migration 2.2: Add governor_id to cities
+            if (!ColumnExists(conn, "cities", "governor_id"))
+            {
+                GD.Print("[Migration] Adding 'governor_id' to cities...");
+                try { ExecuteSql(conn, "ALTER TABLE cities ADD COLUMN governor_id INTEGER DEFAULT 0;"); }
+                catch (Exception ex) { GD.PrintErr($"[Migration] Failed to add 'governor_id': {ex.Message}"); }
+            }
+
             // Migration 3: Add pending_battles table for Deferred Battle Resolution
             bool hasPendingBattles = TableExists(conn, "pending_battles");
             GD.Print($"[Migration] 'pending_battles' table exists? {hasPendingBattles}");
@@ -149,7 +157,9 @@ public partial class DatabaseMigration
                 "days_service INTEGER DEFAULT 0",
                 "last_promotion_day INTEGER DEFAULT 0",
                 "max_troops INTEGER DEFAULT 1000",
-                "is_commander INTEGER DEFAULT 0"
+                "is_commander INTEGER DEFAULT 0",
+                "current_action_points INTEGER DEFAULT 3",
+                "max_action_points INTEGER DEFAULT 3"
             };
 
             foreach (var colDef in officerColumns)
@@ -174,6 +184,11 @@ public partial class DatabaseMigration
                 catch (Exception ex) { GD.PrintErr($"[Migration] Failed to create 'wine_dine_history': {ex.Message}"); }
             }
 
+            // Cleanup: Ensure no NULL action points
+            ExecuteSql(conn, "UPDATE officers SET max_action_points = 5 WHERE is_commander = 1 OR rank = 'Sovereign'");
+            ExecuteSql(conn, "UPDATE officers SET max_action_points = 3 WHERE max_action_points IS NULL");
+            ExecuteSql(conn, "UPDATE officers SET current_action_points = max_action_points WHERE current_action_points IS NULL");
+
             GD.Print("[Migration] Schema Check Complete.");
 
             // Migration 7: RotTK8 Stat Alignment (Combat->Strength, Strategy->Intelligence, +Charisma)
@@ -197,6 +212,37 @@ public partial class DatabaseMigration
                 GD.Print("[Migration] Adding 'charisma' to officers...");
                 try { ExecuteSql(conn, "ALTER TABLE officers ADD COLUMN charisma INTEGER DEFAULT 50"); }
                 catch (Exception ex) { GD.PrintErr($"[Migration] Failed to add charisma: {ex.Message}"); }
+            }
+            // Migration 8: Add source_location_id and leader_id to pending_battles
+            if (TableExists(conn, "pending_battles"))
+            {
+                if (!ColumnExists(conn, "pending_battles", "source_location_id"))
+                {
+                    GD.Print("[Migration] Adding 'source_location_id' to pending_battles...");
+                    try
+                    {
+                        ExecuteSql(conn, "ALTER TABLE pending_battles ADD COLUMN source_location_id INTEGER DEFAULT 0;");
+                        GD.Print("[Migration] 'source_location_id' added successfully.");
+                    }
+                    catch (Exception ex)
+                    {
+                        GD.PrintErr($"[Migration] Failed to add 'source_location_id': {ex.Message}");
+                    }
+                }
+
+                if (!ColumnExists(conn, "pending_battles", "leader_id"))
+                {
+                    GD.Print("[Migration] Adding 'leader_id' to pending_battles...");
+                    try
+                    {
+                        ExecuteSql(conn, "ALTER TABLE pending_battles ADD COLUMN leader_id INTEGER DEFAULT 0;");
+                        GD.Print("[Migration] 'leader_id' added successfully.");
+                    }
+                    catch (Exception ex)
+                    {
+                        GD.PrintErr($"[Migration] Failed to add 'leader_id': {ex.Message}");
+                    }
+                }
             }
         }
     }

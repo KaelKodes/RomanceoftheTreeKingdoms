@@ -25,6 +25,10 @@ class Faction(Base):
     monthly_goal = Column(String) # Conquer, Prosper, Defense
     weekly_task = Column(String)  # Current milestone
     goal_target_id = Column(Integer) # City or Officer ID target
+
+    # Resources
+    gold = Column(Integer, default=1000)
+    supplies = Column(Integer, default=10000)
     
     # Relationships
     officers = relationship("Officer", back_populates="faction")
@@ -77,10 +81,12 @@ class Officer(Base):
     rank = Column(String, default="Volunteer") # Determines Title & Troop Cap
     reputation = Column(Integer, default=0) # Global karma
     current_action_points = Column(Integer, default=3) # Refreshed daily
+    max_action_points = Column(Integer, default=3) # Cap (refreshed daily)
     
     # Troops
     troops = Column(Integer, default=0)
     max_troops = Column(Integer, default=1000)
+    unit_type_id = Column(Integer, ForeignKey('unit_types.unit_type_id'), nullable=True)
 
     # Strategic AI Assignments (Leader Orders)
     current_assignment = Column(String)
@@ -89,6 +95,7 @@ class Officer(Base):
     # Relationships
     faction = relationship("Faction", back_populates="officers")
     current_city = relationship("City", back_populates="officers", foreign_keys=[location_id])
+    unit_type = relationship("UnitType")
 
 class GameState(Base):
     __tablename__ = 'game_state'

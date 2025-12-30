@@ -244,6 +244,91 @@ public partial class DatabaseMigration
                     }
                 }
             }
+
+            // Migration 9: Stat Allocation System
+            string[] statAllocCols = {
+                "stat_points INTEGER DEFAULT 0",
+                "base_strength INTEGER DEFAULT 50",
+                "base_leadership INTEGER DEFAULT 50",
+                "base_intelligence INTEGER DEFAULT 50",
+                "base_politics INTEGER DEFAULT 50",
+                "base_charisma INTEGER DEFAULT 50"
+            };
+            foreach (var colDef in statAllocCols)
+            {
+                string colName = colDef.Split(' ')[0];
+                if (!ColumnExists(conn, "officers", colName))
+                {
+                    GD.Print($"[Migration] Adding '{colName}' to officers...");
+                    try { ExecuteSql(conn, $"ALTER TABLE officers ADD COLUMN {colDef}"); }
+                    catch (Exception ex) { GD.PrintErr($"[Migration] Failed to add '{colName}': {ex.Message}"); }
+                }
+            }
+
+            // Migration 10: Ensure baselines are set for existing players
+            // Force sync if base_strength is 50 (previous incorrect default sync) or NULL/0
+            ExecuteSql(conn, "UPDATE officers SET base_strength = strength, base_leadership = leadership, base_intelligence = intelligence, base_politics = politics, base_charisma = charisma WHERE base_strength IS NULL OR base_strength = 0 OR base_strength = 50;");
+
+            // Migration 11: Add Portrait Source/Coords
+            if (!ColumnExists(conn, "officers", "portrait_source_id"))
+            {
+                GD.Print("[Migration] Adding 'portrait_source_id' to officers...");
+                try { ExecuteSql(conn, "ALTER TABLE officers ADD COLUMN portrait_source_id INTEGER DEFAULT 0;"); }
+                catch (Exception ex) { GD.PrintErr($"[Migration] Failed to add portrait_source_id: {ex.Message}"); }
+            }
+            // Migration 12: Update Routes (Mistwood Connection)
+            // Remove Mistwood <-> River Port
+            // Add Mistwood <-> South Fields
+            GD.Print("[Migration] Updating Route Connections...");
+            try
+            {
+                // Check if old route exists to avoid spamming or redundant deletes? SQL delete is safe.
+                // Mistwood ID? River Port ID?
+                // Subqueries are safest if IDs change.
+                string deleteSql = @"
+                    DELETE FROM routes 
+                    WHERE (start_city_id = (SELECT city_id FROM cities WHERE name='Mistwood') AND end_city_id = (SELECT city_id FROM cities WHERE name='River Port')) 
+                       OR (start_city_id = (SELECT city_id FROM cities WHERE name='River Port') AND end_city_id = (SELECT city_id FROM cities WHERE name='Mistwood'));";
+                ExecuteSql(conn, deleteSql);
+
+                // Check if new route already exists? UNIQUE constraint on (start, end)? 
+                // Let's rely on basic check or just INSERT OR IGNORE if tables are set up right, but easier to just check.
+                // For simplicity here, we'll try to insert. If it duplicates, we might want to be careful.
+                // Assuming standard road for now.
+                string insertSql = @"
+                    INSERT INTO routes (start_city_id, end_city_id, distance, route_type, is_chokepoint)
+                    SELECT c1.city_id, c2.city_id, 2.0, 'Road', 0
+                    FROM cities c1, cities c2
+                    WHERE c1.name = 'Mistwood' AND c2.name = 'South Fields'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM routes r 
+                        WHERE (r.start_city_id = c1.city_id AND r.end_city_id = c2.city_id)
+                           OR (r.start_city_id = c2.city_id AND r.end_city_id = c1.city_id)
+                    );";
+                ExecuteSql(conn, insertSql);
+
+                // Bi-directional?
+                // The seed script adds BOTH ways. We should ensure the other direction is added too? 
+                // Actually my logic above only inserts one way. The game treats routes bi-directionally usually or stores both?
+                // Seed script adds: (c1, c2) AND (c2, c1). So I must add the reverse too.
+                string insertReverseSql = @"
+                    INSERT INTO routes (start_city_id, end_city_id, distance, route_type, is_chokepoint)
+                    SELECT c2.city_id, c1.city_id, 2.0, 'Road', 0
+                    FROM cities c1, cities c2
+                    WHERE c1.name = 'Mistwood' AND c2.name = 'South Fields'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM routes r 
+                        WHERE (r.start_city_id = c2.city_id AND r.end_city_id = c1.city_id)
+                    );";
+                ExecuteSql(conn, insertReverseSql);
+
+                GD.Print("[Migration] Routes updated successfully.");
+            }
+            catch (Exception ex)
+            {
+                // Soft fail, maybe cities don't exist yet if this is a fresh fresh run (unlikely as cities created in step 4/5)
+                GD.PrintErr($"[Migration] Route update failed: {ex.Message}");
+            }
         }
     }
 

@@ -29,7 +29,7 @@ theme_override_constants/margin_bottom = 10
 
 [node name="ColorRect" type="ColorRect" parent="MarginContainer"]
 layout_mode = 2
-color = Color(0.2231029, 0.2231029, 0.22310287, 0.95)
+color = Color(0.14767182, 0.14767182, 0.14767176, 0.76862746)
 
 [node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
 layout_mode = 2
@@ -60,6 +60,7 @@ horizontal_scroll_mode = 0
 clip_contents = true
 layout_mode = 2
 size_flags_horizontal = 3
+alignment = 1
 
 [node name="ActionsHeader" type="Label" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2

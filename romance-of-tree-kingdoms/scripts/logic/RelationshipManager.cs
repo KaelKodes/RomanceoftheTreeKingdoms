@@ -15,13 +15,23 @@ public partial class RelationshipManager : Node
 
 	// --- Officer to Officer Relations ---
 
-	public int GetRelation(int officer1Id, int officer2Id)
+	public int GetRelation(int officer1Id, int officer2Id, SqliteConnection externalConn = null)
 	{
 		if (officer1Id == officer2Id) return 100; // Self love?
 
 		// Force smaller ID first to ensure consistent key (relations are bidirectional here)
 		int idA = Math.Min(officer1Id, officer2Id);
 		int idB = Math.Max(officer1Id, officer2Id);
+
+		if (externalConn != null)
+		{
+			var cmd = externalConn.CreateCommand();
+			cmd.CommandText = "SELECT value FROM officer_relations WHERE officer_1_id = $id1 AND officer_2_id = $id2";
+			cmd.Parameters.AddWithValue("$id1", idA);
+			cmd.Parameters.AddWithValue("$id2", idB);
+			var res = cmd.ExecuteScalar();
+			return (res != null && res != DBNull.Value) ? Convert.ToInt32(res) : 0;
+		}
 
 		using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
 		{
@@ -36,30 +46,45 @@ public partial class RelationshipManager : Node
 		}
 	}
 
-	public void ModifyRelation(int officer1Id, int officer2Id, int delta)
+	public void ModifyRelation(int officer1Id, int officer2Id, int delta, SqliteConnection externalConn = null)
 	{
 		if (officer1Id == officer2Id) return;
 
 		int idA = Math.Min(officer1Id, officer2Id);
 		int idB = Math.Max(officer1Id, officer2Id);
 
-		int current = GetRelation(idA, idB);
+		int current = GetRelation(idA, idB, externalConn);
 		int newVal = Math.Clamp(current + delta, -100, 100);
 
-		using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+		if (externalConn != null)
 		{
-			conn.Open();
-			var cmd = conn.CreateCommand();
-			// Upsert Logic
+			var cmd = externalConn.CreateCommand();
 			cmd.CommandText = @"
                 INSERT INTO officer_relations (officer_1_id, officer_2_id, value) 
                 VALUES ($id1, $id2, $val)
 				ON CONFLICT(officer_1_id, officer_2_id) DO UPDATE SET value = $val";
-
 			cmd.Parameters.AddWithValue("$id1", idA);
 			cmd.Parameters.AddWithValue("$id2", idB);
 			cmd.Parameters.AddWithValue("$val", newVal);
 			cmd.ExecuteNonQuery();
+		}
+		else
+		{
+			using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+			{
+				conn.Open();
+				var cmd = conn.CreateCommand();
+				// Upsert Logic
+				cmd.CommandText = @"
+	                INSERT INTO officer_relations (officer_1_id, officer_2_id, value) 
+	                VALUES ($id1, $id2, $val)
+					ON CONFLICT(officer_1_id, officer_2_id) DO UPDATE SET value = $val";
+
+				cmd.Parameters.AddWithValue("$id1", idA);
+				cmd.Parameters.AddWithValue("$id2", idB);
+				cmd.Parameters.AddWithValue("$val", newVal);
+				cmd.ExecuteNonQuery();
+			}
 		}
 		GD.Print($"Relation between {idA} and {idB} is now {newVal} ({delta:+0;-0})");
 	}

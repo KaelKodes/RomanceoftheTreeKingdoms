@@ -6,20 +6,17 @@ using System.Collections.Generic;
 public partial class DiplomacyManager : Node
 {
 	public static DiplomacyManager Instance { get; private set; }
-	private string _dbPath;
 
 	public override void _Ready()
 	{
 		Instance = this;
-		_dbPath = System.IO.Path.Combine(ProjectSettings.GlobalizePath("res://"), "../tree_kingdoms.db");
-
 		EnsureTableExists();
 		InitializeRelationsIfNeeded();
 	}
 
 	private void EnsureTableExists()
 	{
-		using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+		using (var conn = DatabaseHelper.GetConnection())
 		{
 			conn.Open();
 			var cmd = conn.CreateCommand();
@@ -39,7 +36,7 @@ public partial class DiplomacyManager : Node
 
 	public void InitializeRelationsIfNeeded()
 	{
-		using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+		using (var conn = DatabaseHelper.GetConnection())
 		{
 			conn.Open();
 
@@ -94,7 +91,7 @@ public partial class DiplomacyManager : Node
 
 	public int GetRelation(int sourceId, int targetId)
 	{
-		using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+		using (var conn = DatabaseHelper.GetConnection())
 		{
 			conn.Open();
 			var cmd = conn.CreateCommand();
@@ -108,7 +105,7 @@ public partial class DiplomacyManager : Node
 
 	public void ModifyRelation(int sourceId, int targetId, int delta)
 	{
-		using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+		using (var conn = DatabaseHelper.GetConnection())
 		{
 			conn.Open();
 			var cmd = conn.CreateCommand();

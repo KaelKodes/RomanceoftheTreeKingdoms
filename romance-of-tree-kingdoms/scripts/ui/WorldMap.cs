@@ -3,6 +3,8 @@ using Microsoft.Data.Sqlite;
 using System;
 using System.Collections.Generic;
 
+public class RouteData { public string From; public string To; public string Type; }
+
 public partial class WorldMap : Control
 {
 	// Hardcoded coordinates for the "Hebei" prototype map
@@ -11,35 +13,45 @@ public partial class WorldMap : Control
 	[Export] public GameHUD HUD { get; set; }
 	[Export] public CityMenu CityMenuDialog { get; set; }
 	[Export] public OfficerCard OfficerCardDialog { get; set; }
+	[Export] public RouteOverlay RouteOverlayNode { get; set; }
 
 	// Keep track of buttons to update them later
 	private Dictionary<string, Button> _cityButtons = new Dictionary<string, Button>();
+	public Dictionary<string, Button> GetCityButtons() => _cityButtons;
 
-	private class RouteData { public string From; public string To; public string Type; }
 	private class CityData { public string Name; public string FactionColor; public bool HasPlayer; public bool IsContested; }
 
-	public override void _Draw()
+	// Spacing & Alignment
+	private Dictionary<string, Vector2> _initialPositions = new Dictionary<string, Vector2>();
+	private Vector2 _mapCentroid;
+	private Vector2 _panOffset;
+	private float _currentSpread = 1.0f;
+	private const float MIN_SPREAD = 0.5f;
+	private const float MAX_SPREAD = 3.0f;
+
+	private void AdjustSpacing(float amount)
 	{
-		// 1. Draw Routes (Lines)
-		// 1. Draw Routes (Lines)
-		// We need button positions now. Ensure they are initialized.
-		if (_cityButtons.Count == 0 && CityContainer != null) InitCityNodes();
+		_currentSpread += amount;
+		_currentSpread = Mathf.Clamp(_currentSpread, MIN_SPREAD, MAX_SPREAD);
+		ApplySpacing();
+	}
 
-		var routes = GetRoutesFromDB();
-		foreach (var r in routes)
+	private void ApplySpacing()
+	{
+		foreach (var kvp in _cityButtons)
 		{
-			if (_cityButtons.ContainsKey(r.From) && _cityButtons.ContainsKey(r.To))
+			if (_initialPositions.ContainsKey(kvp.Key))
 			{
-				var btnFrom = _cityButtons[r.From];
-				var btnTo = _cityButtons[r.To];
-
-				// Use GlobalPosition converted to Local to handle container offsets/nesting
-				// Use GlobalPosition relative to this control to handle offsets
-				var start = btnFrom.GlobalPosition - GlobalPosition + btnFrom.Size / 2;
-				var end = btnTo.GlobalPosition - GlobalPosition + btnTo.Size / 2;
-
-				DrawLine(start, end, Colors.Gray, 5.0f);
+				// Scale relative to centroid: NewPos = Centroid + (InitPos - Centroid) * Spread + PanOffset
+				var direction = _initialPositions[kvp.Key] - _mapCentroid;
+				kvp.Value.Position = _mapCentroid + (direction * _currentSpread) + _panOffset;
 			}
+		}
+
+		// Redraw Routes
+		if (RouteOverlayNode != null)
+		{
+			RouteOverlayNode.QueueRedraw();
 		}
 	}
 
@@ -48,60 +60,117 @@ public partial class WorldMap : Control
 
 	public override void _GuiInput(InputEvent @event)
 	{
-		if (@event is InputEventMouseButton mb && mb.Pressed && mb.ButtonIndex == MouseButton.Left)
+		if (@event is InputEventMouseButton mb)
 		{
-			// If background is clicked, hide menu
-			if (CityMenuDialog != null && CityMenuDialog.Visible)
+			if (mb.Pressed && mb.ButtonIndex == MouseButton.Left)
 			{
-				CityMenuDialog.Hide();
-				// Optionally emit InteractionEnded just in case
-				// CityMenuDialog.EmitSignal(CityMenu.SignalName.InteractionEnded);
-				UpdateCityVisuals(); // Refresh state
+				// If background is clicked, hide menu
+				if (CityMenuDialog != null && CityMenuDialog.Visible)
+				{
+					CityMenuDialog.Hide();
+					UpdateCityVisuals(); // Refresh state
+				}
 			}
+			// Spacing Spread
+			else if (mb.ButtonIndex == MouseButton.WheelUp)
+			{
+				AdjustSpacing(0.1f);
+				AcceptEvent();
+			}
+			else if (mb.ButtonIndex == MouseButton.WheelDown)
+			{
+				AdjustSpacing(-0.1f);
+				AcceptEvent();
+			}
+			// Pan removed as we aren't using camera anymore
+        }
+        // Pan (Global Drag with L+R)
+        else if (@event is InputEventMouseMotion mm)
+        {
+            // Check if BOTH Left and Right are pressed
+            if ((mm.ButtonMask & MouseButtonMask.Left) != 0 && (mm.ButtonMask & MouseButtonMask.Right) != 0)
+            {
+                _panOffset += mm.Relative;
+                ApplySpacing();
+                AcceptEvent();
+            }
+        }
+    }
+
+
+    public override void _Ready()
+    {
+        // 1. HUD is in scene
+        if (HUD == null) GD.PrintErr("HUD not linked in WorldMap!");
+
+        // 2. Wire up Dialogs
+        // 2. Wire up Dialogs
+        if (CityMenuDialog != null)
+        {
+            CityMenuDialog.Hide(); // Ensure hidden on start
+            CityMenuDialog.OfficerSelected += ShowOfficerCard;
+            CityMenuDialog.InteractionEnded += OnMenuClosed;
+        }
+
+        if (OfficerCardDialog != null)
+        {
+            OfficerCardDialog.Hide();
+        }
+
+        // 2. Init Cities from Scene
+        InitCityNodes();
+
+        // 3. Listen for updates
+        // 3. Listen for updates
+        var actionMgr = GetNodeOrNull<ActionManager>("/root/ActionManager");
+        if (actionMgr != null)
+        {
+            actionMgr.PlayerLocationChanged += UpdateCityVisuals;
+            actionMgr.NewDayStarted += OnNewDayStarted;
+            actionMgr.MapStateChanged += UpdateCityVisuals;
+        }
+
+        var turnMgr = GetNodeOrNull<TurnManager>("/root/TurnManager");
+        if (turnMgr != null)
+        {
+            turnMgr.TurnStarted += (fid, isPlayer) => UpdateCityVisuals();
+            turnMgr.TurnEnded += UpdateCityVisuals;
+        }
+
+        // 4. Capture Initial Positions and Calc Centroid
+        Vector2 sumPos = Vector2.Zero;
+        int count = 0;
+        foreach (var kvp in _cityButtons)
+        {
+            _initialPositions[kvp.Key] = kvp.Value.Position;
+            sumPos += kvp.Value.Position;
+            count++;
+        }
+        if (count > 0) _mapCentroid = sumPos / count;
+
+
+    }
+
+
+    public override void _ExitTree()
+    {
+        var actionMgr = GetNodeOrNull<ActionManager>("/root/ActionManager");
+        if (actionMgr != null)
+        {
+            actionMgr.PlayerLocationChanged -= UpdateCityVisuals;
+            actionMgr.NewDayStarted -= OnNewDayStarted;
+            actionMgr.MapStateChanged -= UpdateCityVisuals;
+        }
+
+        var turnMgr = GetNodeOrNull<TurnManager>("/root/TurnManager");
+        if (turnMgr != null)
+        {
+			// Note: Lambdas aren't easy to disconnect, but since this is Control-level script
+			// and ActionManager/TurnManager are singletons in Autoload, we should be okay
+			// or use a dedicated method if we want to be safe.
 		}
 	}
 
-	public override void _Ready()
-	{
-		// 1. HUD is in scene
-		if (HUD == null) GD.PrintErr("HUD not linked in WorldMap!");
-
-		// 2. Wire up Dialogs
-		// 2. Wire up Dialogs
-		if (CityMenuDialog != null)
-		{
-			CityMenuDialog.Hide(); // Ensure hidden on start
-			CityMenuDialog.OfficerSelected += ShowOfficerCard;
-			CityMenuDialog.InteractionEnded += OnMenuClosed;
-		}
-
-		if (OfficerCardDialog != null)
-		{
-			OfficerCardDialog.Hide();
-		}
-
-		// 2. Init Cities from Scene
-		InitCityNodes();
-
-		// 3. Listen for updates
-		// 3. Listen for updates
-		var actionMgr = GetNodeOrNull<ActionManager>("/root/ActionManager");
-		if (actionMgr != null)
-		{
-			actionMgr.PlayerLocationChanged += UpdateCityVisuals;
-			actionMgr.NewDayStarted += OnNewDayStarted;
-		}
-	}
-
-	public override void _ExitTree()
-	{
-		var actionMgr = GetNodeOrNull<ActionManager>("/root/ActionManager");
-		if (actionMgr != null)
-		{
-			actionMgr.PlayerLocationChanged -= UpdateCityVisuals;
-			actionMgr.NewDayStarted -= OnNewDayStarted;
-		}
-	}
 
 	private void OnNewDayStarted()
 	{
@@ -182,6 +251,12 @@ public partial class WorldMap : Control
 		}
 
 		UpdateCityVisuals(); // Apply DB data
+
+		if (RouteOverlayNode != null)
+		{
+			var routes = GetRoutesFromDB();
+			RouteOverlayNode.Init(this, routes);
+		}
 	}
 
 	private void OnCityPressedWrapper() { } // Dummy for signal check if needed, but lambda above is fine for this scope.

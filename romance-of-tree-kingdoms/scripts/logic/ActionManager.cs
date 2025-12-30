@@ -10,6 +10,9 @@ public partial class ActionManager : Node
 	[Signal] public delegate void ActionPointsChangedEventHandler();
 	[Signal] public delegate void PlayerLocationChangedEventHandler();
 	[Signal] public delegate void NewDayStartedEventHandler();
+	[Signal] public delegate void PlayerStatsChangedEventHandler();
+	[Signal] public delegate void MapStateChangedEventHandler();
+
 
 	// private string _dbPath; // Removed
 
@@ -31,11 +34,25 @@ public partial class ActionManager : Node
 				// Self-Correction for Rank Issue
 				FixPlayerRank(conn);
 				FixLeaderRanks(conn);
+				FixPlayerBaselines(conn);
 			}
 			catch (Exception ex)
 			{
 				GD.PrintErr($"Schema Migration Error: {ex.Message}");
 			}
+		}
+	}
+
+	private void FixPlayerBaselines(SqliteConnection conn)
+	{
+		// Force sync if baselines are higher than current stats (clamping issue) or NULL/0
+		var upCmd = conn.CreateCommand();
+		upCmd.CommandText = "UPDATE officers SET base_strength = strength, base_leadership = leadership, base_intelligence = intelligence, base_politics = politics, base_charisma = charisma WHERE is_player = 1 AND (base_strength IS NULL OR base_strength = 0 OR base_strength > strength OR base_leadership > leadership);";
+		int rows = upCmd.ExecuteNonQuery();
+		if (rows > 0)
+		{
+			GD.Print($"[ActionManager] Synced baseline stats for player ({rows} fields checked).");
+			EmitSignal(SignalName.PlayerStatsChanged);
 		}
 	}
 
@@ -396,11 +413,14 @@ public partial class ActionManager : Node
 			string newRank = rank;
 			int newMaxTroops = maxTroops;
 
+			// Sovereigns are at the highest rank and don't need promotion checks
+			if (rank == GameConstants.RANK_SOVEREIGN || rank == "Sovereign") return;
+
 			// Promotion Logic (Smoothed gates)
-			if (rep >= 1500 && wins >= 10) { newRank = GameConstants.RANK_GENERAL; newMaxTroops = GameConstants.TROOPS_GENERAL; }
-			else if (rep >= 800 && wins >= 5) { newRank = GameConstants.RANK_CAPTAIN; newMaxTroops = GameConstants.TROOPS_CAPTAIN; }
-			else if (rep >= 300 && wins >= 3) { newRank = GameConstants.RANK_OFFICER; newMaxTroops = GameConstants.TROOPS_OFFICER; }
-			else if (rep >= 100) { newRank = GameConstants.RANK_REGULAR; newMaxTroops = GameConstants.TROOPS_REGULAR; }
+			if (rep >= 1000) { newRank = GameConstants.RANK_GENERAL; newMaxTroops = GameConstants.TROOPS_GENERAL; }
+			else if (rep >= 400) { newRank = GameConstants.RANK_CAPTAIN; newMaxTroops = GameConstants.TROOPS_CAPTAIN; }
+			else if (rep >= 150) { newRank = GameConstants.RANK_OFFICER; newMaxTroops = GameConstants.TROOPS_OFFICER; }
+			else if (rep >= 50) { newRank = GameConstants.RANK_REGULAR; newMaxTroops = GameConstants.TROOPS_REGULAR; }
 
 			if (newRank != rank)
 			{
@@ -413,8 +433,45 @@ public partial class ActionManager : Node
 				{
 					int troopGain = newMaxTroops - maxTroops;
 					r.Close(); // Close reader to execute update
+
+					// Check if player for stat points
+					var checkPlayerCmd = conn.CreateCommand();
+					checkPlayerCmd.CommandText = "SELECT is_player, strength, leadership, intelligence, politics, charisma FROM officers WHERE officer_id = $oid";
+					checkPlayerCmd.Parameters.AddWithValue("$oid", officerId);
+					bool isPlayer = false;
+					int s = 0, l = 0, i = 0, p = 0, c = 0;
+					using (var r2 = checkPlayerCmd.ExecuteReader())
+					{
+						if (r2.Read())
+						{
+							isPlayer = r2.GetInt32(0) == 1;
+							s = r2.GetInt32(1); l = r2.GetInt32(2); i = r2.GetInt32(3); p = r2.GetInt32(4); c = r2.GetInt32(5);
+						}
+					}
+
 					var upCmd = conn.CreateCommand();
-					upCmd.CommandText = "UPDATE officers SET rank = $rnk, max_troops = $mt, troops = troops + $gain, last_promotion_day = (SELECT current_day FROM game_state) WHERE officer_id = $oid";
+					if (isPlayer)
+					{
+						upCmd.CommandText = @"
+							UPDATE officers 
+							SET rank = $rnk, 
+								max_troops = $mt, 
+								troops = troops + $gain, 
+								last_promotion_day = (SELECT current_day FROM game_state), 
+								stat_points = stat_points + 5,
+								base_strength = $s, base_leadership = $l, base_intelligence = $i, base_politics = $p, base_charisma = $c
+							WHERE officer_id = $oid";
+						upCmd.Parameters.AddWithValue("$s", s);
+						upCmd.Parameters.AddWithValue("$l", l);
+						upCmd.Parameters.AddWithValue("$i", i);
+						upCmd.Parameters.AddWithValue("$p", p);
+						upCmd.Parameters.AddWithValue("$c", c);
+					}
+					else
+					{
+						upCmd.CommandText = "UPDATE officers SET rank = $rnk, max_troops = $mt, troops = troops + $gain, last_promotion_day = (SELECT current_day FROM game_state) WHERE officer_id = $oid";
+					}
+
 					upCmd.Parameters.AddWithValue("$rnk", newRank);
 					upCmd.Parameters.AddWithValue("$mt", newMaxTroops);
 					upCmd.Parameters.AddWithValue("$gain", troopGain);
@@ -422,6 +479,7 @@ public partial class ActionManager : Node
 					upCmd.ExecuteNonQuery();
 
 					GD.Print($"PROMOTION SUCCESS! {name} has reached the rank of {newRank}! (+{troopGain} troops)");
+					if (isPlayer) EmitSignal(SignalName.PlayerStatsChanged);
 				}
 			}
 			else if (rep >= 100) // Log if they qualify but are already there or somehow stuck
@@ -526,7 +584,7 @@ public partial class ActionManager : Node
 			}
 			catch { /* Column likely exists */ }
 
-			ExecuteSql(conn, $"UPDATE officers SET current_action_points = current_action_points - 1 WHERE officer_id = {officerId}");
+			ExecuteSql(conn, $"UPDATE officers SET current_action_points = current_action_points - 1, reputation = reputation + 15 WHERE officer_id = {officerId}");
 
 			// Include source_location_id and leader_id in INSERT
 			var insertCmd = conn.CreateCommand();
@@ -542,7 +600,10 @@ public partial class ActionManager : Node
 			// DYNAMIC RELATIONSHIP: Residents of the city are NOT happy about being attacked
 			UpdateCityFactionOpinion(conn, cityId, factionId, -5);
 
+			EmitSignal(SignalName.MapStateChanged);
+
 			EmitSignal(SignalName.ActionPointsChanged);
+
 			return true;
 		}
 	}
@@ -613,6 +674,7 @@ public partial class ActionManager : Node
 
 	// Additional Signal
 	// [Signal] public delegate void PlayerLocationChangedEventHandler(); // Already defined above
+	// [Signal] public delegate void PlayerStatsChangedEventHandler(); // New signal for player stat updates
 
 	public void PerformTravel(int playerId, int targetCityId)
 	{
@@ -979,21 +1041,31 @@ public partial class ActionManager : Node
 				updateSql = $"UPDATE cities SET public_order = MIN(100, public_order + {gain}) WHERE city_id = {cityId}";
 			}
 
-			ExecuteSql(conn, updateSql);
-
-			// 4. Rewards (Reputation, Gold, Exp)
-			ExecuteSql(conn, $"UPDATE officers SET current_action_points = current_action_points - 1, reputation = reputation + 10, gold = gold + 50, days_service = days_service + 1 WHERE officer_id = {officerId}");
-
-			GD.Print($"{name} performed {actionName} in city {cityId}. Gain: {gain}!");
-
-			// DYNAMIC RELATIONSHIP: Officers in this city like the faction more for investing (Prosperity)
-			if (factionId > 0)
+			using (var trans = conn.BeginTransaction())
 			{
-				UpdateCityFactionOpinion(conn, cityId, (int)factionId, 1); // Small boost
-			}
+				try
+				{
+					ExecuteSql(conn, updateSql);
+					ExecuteSql(conn, $"UPDATE officers SET current_action_points = current_action_points - 1, reputation = reputation + 8, gold = gold + 50, days_service = days_service + 1 WHERE officer_id = {officerId}");
 
-			// Notify UI
-			EmitSignal(nameof(ActionPointsChanged)); // Refresh HUD
+					trans.Commit();
+					GD.Print($"{name} performed {actionName} in city {cityId}. Gain: {gain} and +8 Reputation!");
+
+					// DYNAMIC RELATIONSHIP: Officers in this city like the faction more for investing (Prosperity)
+					if (factionId > 0)
+					{
+						UpdateCityFactionOpinion(conn, cityId, (int)factionId, 1); // Small boost
+					}
+
+					CheckPromotions(officerId, conn);
+					EmitSignal(nameof(ActionPointsChanged)); // Refresh HUD
+				}
+				catch (Exception ex)
+				{
+					trans.Rollback();
+					GD.PrintErr($"Domestic Action Failed: {ex.Message}");
+				}
+			}
 		}
 	}
 
@@ -1062,7 +1134,8 @@ public partial class ActionManager : Node
 	}
 
 	// 2. Study: Improve Stats
-	public void PerformStudy(int officerId, string statName)
+	// 2. Train: Improve Stats (Requires Mentor & Gold)
+	public void PerformTrain(int officerId, int mentorId, string statName)
 	{
 		if (!HasActionPoints(officerId)) { GD.Print("Not enough AP!"); return; }
 
@@ -1070,26 +1143,173 @@ public partial class ActionManager : Node
 		{
 			conn.Open();
 
-			// Validate Stat Name
-			string[] validStats = { "leadership", "intelligence", "strength", "politics", "charisma" };
-			if (Array.IndexOf(validStats, statName.ToLower()) == -1)
+			// Validate Stat
+			string sLow = statName.ToLower();
+			string[] valid = { "leadership", "intelligence", "strength", "politics", "charisma" };
+			if (Array.IndexOf(valid, sLow) == -1) { GD.PrintErr("Invalid Stat"); return; }
+
+			// 1. Get Trainee Info
+			var tCmd = conn.CreateCommand();
+			tCmd.CommandText = $"SELECT {sLow}, gold, name FROM officers WHERE officer_id = $oid";
+			tCmd.Parameters.AddWithValue("$oid", officerId);
+			int tStat = 0;
+			int tGold = 0;
+			string tName = "";
+			using (var r = tCmd.ExecuteReader())
 			{
-				GD.PrintErr("Invalid Stat for study");
+				if (r.Read())
+				{
+					tStat = r.GetInt32(0);
+					tGold = r.GetInt32(1);
+					tName = r.GetString(2);
+				}
+			}
+
+			// 2. Validate Mentor
+			var mCmd = conn.CreateCommand();
+			mCmd.CommandText = $"SELECT {sLow}, name FROM officers WHERE officer_id = $mid";
+			mCmd.Parameters.AddWithValue("$mid", mentorId);
+			int mStat = 0;
+			string mName = "";
+			using (var r = mCmd.ExecuteReader())
+			{
+				if (r.Read())
+				{
+					mStat = r.GetInt32(0);
+					mName = r.GetString(1);
+				}
+			}
+
+			if (mStat <= tStat)
+			{
+				GD.Print("Mentor is not skilled enough to teach you!");
 				return;
 			}
 
-			int gain = new Random().Next(1, 3); // +1 or +2
-												// Experience gain could be implicit (e.g. 100 exp = +1 stat), but simpler direct gain for now.
-												// RotTK 8 uses exp, but for MVP we do direct small gains.
+			// 3. Calculate Cost
+			int baseCost = GetTrainingCost(tStat);
+			int relation = RelationshipManager.Instance.GetRelation(officerId, mentorId);
 
-			// Cap stats at 100? or 255? Let's assume soft cap 100 for now or just let them grow.
-			// We'll just add.
+			// Relation Modifier: +/- 25% based on -50 to +50 delta from neutral
+			// Rel 50 = 1.0x, Rel 100 = 0.75x, Rel 0 = 1.25x
+			float multiplier = 1.0f - ((relation - 50.0f) / 200.0f);
+			int finalCost = (int)(baseCost * multiplier);
 
-			ExecuteSql(conn, $"UPDATE officers SET {statName.ToLower()} = {statName.ToLower()} + {gain}, current_action_points = current_action_points - 1 WHERE officer_id = {officerId}");
+			if (tGold < finalCost)
+			{
+				GD.Print($"Not enough Gold! Need {finalCost}g (Base {baseCost}g with Relation {relation}), Have {tGold}g.");
+				return;
+			}
 
-			GD.Print($"Studied {statName}! Gained +{gain}!");
-			EmitSignal(nameof(ActionPointsChanged));
+			// 4. Execute
+			using (var trans = conn.BeginTransaction())
+			{
+				try
+				{
+					// Weighted Random for 1-5 Gain
+					// 1: 35%, 2: 30%, 3: 20%, 4: 10%, 5: 5%
+					int roll = new Random().Next(1, 101);
+					int gain = 1;
+					if (roll > 95) gain = 5;
+					else if (roll > 85) gain = 4;
+					else if (roll > 65) gain = 3;
+					else if (roll > 35) gain = 2;
+
+					// Deduct Gold & AP, Add Stat
+					ExecuteSql(conn, $@"
+                        UPDATE officers 
+                        SET {sLow} = {sLow} + {gain}, 
+                            base_{sLow} = CASE WHEN is_player = 1 THEN base_{sLow} + {gain} ELSE base_{sLow} END,
+                            reputation = reputation + 5, 
+                            current_action_points = current_action_points - 1,
+                            gold = gold - {finalCost}
+						WHERE officer_id = {officerId}");
+
+					// Pay the mentor? Or does it go to the 'void'? 
+					// Let's give the mentor a small cut (half) to simulate economy, or just void for now to check inflation.
+					// User didn't specify, void is safer for now.
+
+					// Relationship Bonus
+					RelationshipManager.Instance.ModifyRelation(officerId, mentorId, 5, conn);
+
+					trans.Commit();
+					GD.Print($"Trained {statName} with {mName}! +{gain} Stat, Cost {finalCost}g. Relation +5.");
+
+					CheckPromotions(officerId, conn);
+					EmitSignal(nameof(ActionPointsChanged));
+					EmitSignal(SignalName.PlayerStatsChanged);
+				}
+				catch (Exception ex)
+				{
+					trans.Rollback();
+					GD.PrintErr($"Training Failed: {ex.Message}");
+				}
+			}
 		}
+	}
+
+	public List<(int OfficerId, string Name, int StatValue, int Cost, int Relation)> GetPotentialMentors(int traineeId, string statName)
+	{
+		var list = new List<(int, string, int, int, int)>();
+		string sLow = statName.ToLower();
+
+		using (var conn = DatabaseHelper.GetConnection())
+		{
+			conn.Open();
+
+			// 1. Get Trainee Info
+			var tCmd = conn.CreateCommand();
+			tCmd.CommandText = $"SELECT location_id, {sLow} FROM officers WHERE officer_id = $oid";
+			tCmd.Parameters.AddWithValue("$oid", traineeId);
+			int locId = 0;
+			int tStat = 0;
+			using (var r = tCmd.ExecuteReader())
+			{
+				if (r.Read())
+				{
+					locId = r.GetInt32(0);
+					tStat = r.GetInt32(1);
+				}
+			}
+
+			// 2. Find Mentors
+			var mCmd = conn.CreateCommand();
+			mCmd.CommandText = $"SELECT officer_id, name, {sLow} FROM officers WHERE location_id = $loc AND {sLow} > $tStat AND officer_id != $oid";
+			mCmd.Parameters.AddWithValue("$loc", locId);
+			mCmd.Parameters.AddWithValue("$tStat", tStat);
+			mCmd.Parameters.AddWithValue("$oid", traineeId);
+
+			using (var r = mCmd.ExecuteReader())
+			{
+				while (r.Read())
+				{
+					int mId = r.GetInt32(0);
+					string name = r.GetString(1);
+					int mStat = r.GetInt32(2);
+
+					int relation = RelationshipManager.Instance.GetRelation(traineeId, mId);
+					int baseCost = GetTrainingCost(tStat); // Cost based on STUDENT level
+					float multiplier = 1.0f - ((relation - 50.0f) / 200.0f);
+					int cost = (int)(baseCost * multiplier);
+
+					list.Add((mId, name, mStat, cost, relation));
+				}
+			}
+		}
+		return list;
+	}
+
+	private int GetTrainingCost(int currentStat)
+	{
+		if (currentStat <= 20) return 20;
+		if (currentStat <= 35) return 50;
+		if (currentStat <= 50) return 100;
+		if (currentStat <= 65) return 250;
+		if (currentStat <= 75) return 500;
+		if (currentStat <= 85) return 750;
+		if (currentStat <= 90) return 1000;
+		if (currentStat <= 95) return 2500;
+		return 5000; // 96-100
 	}
 
 	// 4. Talk: Improve relationships
@@ -1133,7 +1353,8 @@ public partial class ActionManager : Node
 
 			ExecuteSql(conn, $"UPDATE officers SET current_action_points = current_action_points - 1, reputation = reputation + 2 WHERE officer_id = {officerId}");
 
-			GD.Print($"{name} talked with {tName}. Relationship +{delta}!");
+			GD.Print($"{name} talked with {tName}. Relationship +{delta} and +2 Reputation!");
+			CheckPromotions(officerId, conn);
 			EmitSignal(nameof(ActionPointsChanged));
 		}
 	}
@@ -1262,7 +1483,7 @@ public partial class ActionManager : Node
 			// For now, let's say it fills up to Max Troops
 			if (factionGold < 200) { GD.Print("Faction does not have enough Gold (Need 200)!"); return; }
 
-			ExecuteSql(conn, $"UPDATE officers SET unit_type_id = {targetUnitId}, troops = max_troops, current_action_points = current_action_points - 1 WHERE officer_id = {officerId}");
+			ExecuteSql(conn, $"UPDATE officers SET unit_type_id = {targetUnitId}, troops = max_troops, current_action_points = current_action_points - 1, reputation = reputation + 5 WHERE officer_id = {officerId}");
 			ExecuteSql(conn, $"UPDATE factions SET gold = gold - 200 WHERE faction_id = (SELECT faction_id FROM officers WHERE officer_id = {officerId})");
 
 			GD.Print($"{name} recruited {unitName} for their squad. Faction Gold -200.");
@@ -1365,6 +1586,43 @@ public partial class ActionManager : Node
 				{
 					trans.Rollback();
 					GD.PrintErr($"Rise Up Failed: {ex.Message}");
+				}
+			}
+		}
+	}
+
+	public void PerformDomesticAction(int officerId, int cityId, string actionName, string updateSql, string gain)
+	{
+		if (!HasActionPoints(officerId)) { GD.Print("Not enough AP!"); return; }
+
+		using (var conn = DatabaseHelper.GetConnection())
+		{
+			conn.Open();
+
+			string name = "";
+			using (var cmd = conn.CreateCommand())
+			{
+				cmd.CommandText = "SELECT name FROM officers WHERE officer_id = $oid";
+				cmd.Parameters.AddWithValue("$oid", officerId);
+				name = (string)cmd.ExecuteScalar();
+			}
+
+			using (var trans = conn.BeginTransaction())
+			{
+				try
+				{
+					ExecuteSql(conn, updateSql);
+					ExecuteSql(conn, $"UPDATE officers SET reputation = reputation + 8, current_action_points = current_action_points - 1 WHERE officer_id = {officerId}");
+
+					trans.Commit();
+					GD.Print($"{name} performed {actionName} in {cityId}! Gained {gain} and +8 Reputation.");
+					CheckPromotions(officerId, conn);
+					EmitSignal(nameof(ActionPointsChanged));
+				}
+				catch (Exception ex)
+				{
+					trans.Rollback();
+					GD.PrintErr($"Domestic Action Failed: {ex.Message}");
 				}
 			}
 		}

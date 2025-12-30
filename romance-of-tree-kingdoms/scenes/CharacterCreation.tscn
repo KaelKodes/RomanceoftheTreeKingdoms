@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3 uid="uid://jo36h7kwm4uq"]
+[gd_scene load_steps=3 format=3 uid="uid://jo36h7kwm4uq"]
 
 [ext_resource type="Script" uid="uid://7v6nya1ntbsq" path="res://scripts/ui/CharacterCreation.cs" id="1_r13d2"]
+[ext_resource type="Texture2D" uid="uid://crw52k2ija21c" path="res://assets/art/CreationBKG.png" id="2_q0b5v"]
 
 [node name="CharacterCreation" type="Control" node_paths=PackedStringArray("NameInput", "LeadershipSpinBox", "IntelligenceSpinBox", "StrengthSpinBox", "PoliticsSpinBox", "CharismaSpinBox", "PointsLeftSpinBox")]
 layout_mode = 3
@@ -10,131 +11,169 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_r13d2")
-NameInput = NodePath("CreationControl/VBoxContainer/LineEdit")
-LeadershipSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/LeadershipSpinBox")
-IntelligenceSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/IntelligenceSpinBox")
-StrengthSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/StrengthSpinBox")
-PoliticsSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/PoliticsSpinBox")
-CharismaSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/CharismaSpinBox")
-PointsLeftSpinBox = NodePath("CreationControl/VBoxContainer/GridContainer/PointsLeftSpinBox")
+NameInput = NodePath("MarginContainer/CreationControl/VBoxContainer/LineEdit")
+LeadershipSpinBox = NodePath("MarginContainer/CreationControl/VBoxContainer/GridContainer/LeadershipSpinBox")
+IntelligenceSpinBox = NodePath("MarginContainer/CreationControl/VBoxContainer/GridContainer/IntelligenceSpinBox")
+StrengthSpinBox = NodePath("MarginContainer/CreationControl/VBoxContainer/GridContainer/StrengthSpinBox")
+PoliticsSpinBox = NodePath("MarginContainer/CreationControl/VBoxContainer/GridContainer/PoliticsSpinBox")
+CharismaSpinBox = NodePath("MarginContainer/CreationControl/VBoxContainer/GridContainer/CharismaSpinBox")
+PointsLeftSpinBox = NodePath("MarginContainer/CreationControl/VBoxContainer/GridContainer/PointsLeftSpinBox")
 
-[node name="ButtonControl" type="MarginContainer" parent="."]
+[node name="TextureRect" type="TextureRect" parent="."]
 layout_mode = 1
-anchors_preset = 7
-anchor_left = 0.5
-anchor_top = 1.0
-anchor_right = 0.5
+anchors_preset = 15
+anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -86.0
-offset_top = -40.0
-offset_right = 86.0
+offset_top = -1.0
+offset_bottom = -1.0
 grow_horizontal = 2
-grow_vertical = 0
+grow_vertical = 2
+texture = ExtResource("2_q0b5v")
+expand_mode = 1
 
-[node name="HBoxContainer" type="HBoxContainer" parent="ButtonControl"]
-layout_mode = 2
-size_flags_vertical = 0
-
-[node name="ConfirmButton" type="Button" parent="ButtonControl/HBoxContainer"]
-layout_mode = 2
-text = "Confirm"
-
-[node name="ResetButton" type="Button" parent="ButtonControl/HBoxContainer"]
-layout_mode = 2
-text = "Reset"
-
-[node name="QuitButton" type="Button" parent="ButtonControl/HBoxContainer"]
-layout_mode = 2
-text = "Quit"
-
-[node name="CreationControl" type="MarginContainer" parent="."]
+[node name="Panel" type="Panel" parent="."]
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -92.5
-offset_top = -116.5
-offset_right = 92.5
-offset_bottom = 116.5
+offset_left = -96.0
+offset_top = -156.5
+offset_right = 96.0
+offset_bottom = 156.5
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="CreationControl"]
-layout_mode = 2
+[node name="MarginContainer" type="MarginContainer" parent="."]
+z_index = 1
+clip_contents = true
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -97.0
+offset_top = -157.5
+offset_right = 97.0
+offset_bottom = 157.5
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 3
+theme_override_constants/margin_top = 3
+theme_override_constants/margin_right = 3
+theme_override_constants/margin_bottom = 3
 
-[node name="Label" type="Label" parent="CreationControl/VBoxContainer"]
+[node name="CreationControl" type="MarginContainer" parent="MarginContainer"]
 layout_mode = 2
+size_flags_vertical = 0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/CreationControl"]
+layout_mode = 2
+size_flags_horizontal = 4
+alignment = 1
+
+[node name="Label" type="Label" parent="MarginContainer/CreationControl/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
 text = "Characters Name:"
 horizontal_alignment = 1
 
-[node name="LineEdit" type="LineEdit" parent="CreationControl/VBoxContainer"]
+[node name="LineEdit" type="LineEdit" parent="MarginContainer/CreationControl/VBoxContainer"]
 layout_mode = 2
 placeholder_text = "..."
 alignment = 1
 
-[node name="GridContainer" type="GridContainer" parent="CreationControl/VBoxContainer"]
+[node name="GridContainer" type="GridContainer" parent="MarginContainer/CreationControl/VBoxContainer"]
 layout_mode = 2
 columns = 2
 
-[node name="StrengthLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
+[node name="StrengthLabel" type="Label" parent="MarginContainer/CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
 tooltip_text = "Strength directly boosts the damage dealt by your unit in combat and improves your efficiency when patrolling."
 mouse_filter = 0
 text = "Strength: "
 
-[node name="StrengthSpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
+[node name="StrengthSpinBox" type="SpinBox" parent="MarginContainer/CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
 alignment = 1
 
-[node name="LeadershipLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
+[node name="LeadershipLabel" type="Label" parent="MarginContainer/CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
 tooltip_text = "High Leadership increases the defense of the city you govern and determines your ability to lead large armies effectively."
 mouse_filter = 0
 text = "Leadership: "
 
-[node name="LeadershipSpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
+[node name="LeadershipSpinBox" type="SpinBox" parent="MarginContainer/CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
 alignment = 1
 
-[node name="IntelligenceLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
+[node name="IntelligenceLabel" type="Label" parent="MarginContainer/CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
 tooltip_text = "Intelligence governs the speed of technology research and aids in spotting enemy schemes."
 mouse_filter = 0
 text = "Intelligence: "
 
-[node name="IntelligenceSpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
+[node name="IntelligenceSpinBox" type="SpinBox" parent="MarginContainer/CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
 alignment = 1
 
-[node name="PoliticsLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
+[node name="PoliticsLabel" type="Label" parent="MarginContainer/CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
 tooltip_text = "A high Politics stat drastically improves gold commerce and agricultural food production."
 mouse_filter = 0
 text = "Politics:"
 
-[node name="PoliticsSpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
+[node name="PoliticsSpinBox" type="SpinBox" parent="MarginContainer/CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
 alignment = 1
 
-[node name="CharismaLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
+[node name="CharismaLabel" type="Label" parent="MarginContainer/CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
 tooltip_text = "key to recruiting powerful officers to your cause and succeeding in high-stakes diplomatic negotiation"
 mouse_filter = 0
 text = "Charisma:"
 
-[node name="CharismaSpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
+[node name="CharismaSpinBox" type="SpinBox" parent="MarginContainer/CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
 alignment = 1
 
-[node name="PointsLeftLabel" type="Label" parent="CreationControl/VBoxContainer/GridContainer"]
+[node name="PointsLeftLabel" type="Label" parent="MarginContainer/CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
 text = "Remaining:"
 
-[node name="PointsLeftSpinBox" type="SpinBox" parent="CreationControl/VBoxContainer/GridContainer"]
+[node name="PointsLeftSpinBox" type="SpinBox" parent="MarginContainer/CreationControl/VBoxContainer/GridContainer"]
 layout_mode = 2
 alignment = 1
 editable = false
 
-[connection signal="pressed" from="ButtonControl/HBoxContainer/ConfirmButton" to="." method="OnConfirmPressed"]
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+size_flags_vertical = 8
+alignment = 1
+
+[node name="ButtonControl" type="MarginContainer" parent="MarginContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 8
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer/HBoxContainer/ButtonControl"]
+layout_mode = 2
+size_flags_vertical = 0
+alignment = 1
+
+[node name="ConfirmButton" type="Button" parent="MarginContainer/HBoxContainer/ButtonControl/HBoxContainer"]
+layout_mode = 2
+text = "Confirm"
+
+[node name="ResetButton" type="Button" parent="MarginContainer/HBoxContainer/ButtonControl/HBoxContainer"]
+layout_mode = 2
+text = "Reset"
+
+[node name="QuitButton" type="Button" parent="MarginContainer/HBoxContainer/ButtonControl/HBoxContainer"]
+layout_mode = 2
+text = "Quit"
+
+[connection signal="pressed" from="MarginContainer/HBoxContainer/ButtonControl/HBoxContainer/ConfirmButton" to="." method="OnConfirmPressed"]

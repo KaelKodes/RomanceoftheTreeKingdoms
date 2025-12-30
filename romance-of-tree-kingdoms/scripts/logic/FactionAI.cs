@@ -13,6 +13,150 @@ public partial class FactionAI : Node
         Instance = this;
     }
 
+    public void RepositionOfficers(SqliteConnection conn, int factionId)
+    {
+        GD.Print($"[Repositioning] Faction {factionId} is reorganizing for the week...");
+
+        // 1. Fetch Cities
+        var cities = new List<AI_City>();
+        var cityCmd = conn.CreateCommand();
+        cityCmd.CommandText = "SELECT city_id, name, is_hq, governor_id FROM cities WHERE faction_id = $fid";
+        cityCmd.Parameters.AddWithValue("$fid", factionId);
+        using (var reader = cityCmd.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                cities.Add(new AI_City
+                {
+                    CityId = reader.GetInt32(0),
+                    Name = reader.GetString(1),
+                    IsHQ = reader.GetBoolean(2),
+                    GovernorId = reader.IsDBNull(3) ? 0 : reader.GetInt32(3)
+                });
+            }
+        }
+
+        if (cities.Count == 0) return;
+
+        // 2. Identify Frontline Cities (Adjacent to foreign or neutral cities)
+        foreach (var city in cities)
+        {
+            var adjCmd = conn.CreateCommand();
+            adjCmd.CommandText = @"
+                SELECT COUNT(*) FROM routes r
+                JOIN cities c ON (r.start_city_id = c.city_id OR r.end_city_id = c.city_id)
+                WHERE (r.start_city_id = $cid OR r.end_city_id = $cid)
+                AND c.city_id != $cid
+                AND (c.faction_id IS NULL OR c.faction_id != $fid)";
+            adjCmd.Parameters.AddWithValue("$cid", city.CityId);
+            adjCmd.Parameters.AddWithValue("$fid", factionId);
+            city.IsFrontline = (long)adjCmd.ExecuteScalar() > 0;
+        }
+
+        // 3. Fetch All Officers of this faction
+        var officers = new List<AI_Officer_Stats>();
+        var offCmd = conn.CreateCommand();
+        offCmd.CommandText = "SELECT officer_id, name, strength, politics, intelligence, leadership, is_commander FROM officers WHERE faction_id = $fid";
+        offCmd.Parameters.AddWithValue("$fid", factionId);
+        using (var reader = offCmd.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                var o = new AI_Officer_Stats
+                {
+                    OfficerId = reader.GetInt32(0),
+                    Name = reader.GetString(1),
+                    Strength = reader.GetInt32(2),
+                    Politics = reader.IsDBNull(3) ? 50 : reader.GetInt32(3),
+                    Intelligence = reader.IsDBNull(4) ? 50 : reader.GetInt32(4),
+                    Leadership = reader.IsDBNull(5) ? 50 : reader.GetInt32(5),
+                    IsCommander = reader.IsDBNull(6) ? false : (reader.GetInt32(6) == 1)
+                };
+                // Categorize: Warriors prefer Strength/Leadership, Bureaucrats prefer Politics/Intelligence
+                o.IsWarrior = (o.Strength + o.Leadership) >= (o.Politics + o.Intelligence);
+                officers.Add(o);
+            }
+        }
+
+        // 4. Redistribution Algorithm
+        var assignments = new Dictionary<int, int>(); // OfficerID -> CityID
+        var remainingOfficers = new List<AI_Officer_Stats>(officers);
+
+        // Step A: Governors must be at their post (Top Priority)
+        foreach (var city in cities)
+        {
+            if (city.GovernorId > 0)
+            {
+                var gov = remainingOfficers.FirstOrDefault(o => o.OfficerId == city.GovernorId);
+                if (gov != null)
+                {
+                    assignments[gov.OfficerId] = city.CityId;
+                    remainingOfficers.Remove(gov);
+                }
+            }
+        }
+
+        // Step A2: Faction Leader should stay at HQ (unless already assigned as Governor)
+        var fLeader = remainingOfficers.FirstOrDefault(o => o.IsCommander);
+        if (fLeader != null)
+        {
+            var hqCity = cities.FirstOrDefault(c => c.IsHQ) ?? cities.FirstOrDefault();
+            if (hqCity != null)
+            {
+                assignments[fLeader.OfficerId] = hqCity.CityId;
+                remainingOfficers.Remove(fLeader);
+            }
+        }
+
+
+        var frontlineCities = cities.Where(c => c.IsFrontline).ToList();
+        var safeCities = cities.Where(c => !c.IsFrontline).ToList();
+
+        // If no specific frontline found (isolated kingdom?), treat all as safe
+        if (frontlineCities.Count == 0) frontlineCities = cities;
+
+        // Step B: Warriors to the Frontline
+        var warriors = remainingOfficers.Where(o => o.IsWarrior).OrderByDescending(o => o.Strength).ToList();
+        if (frontlineCities.Count > 0)
+        {
+            int fIdx = 0;
+            foreach (var w in warriors)
+            {
+                assignments[w.OfficerId] = frontlineCities[fIdx].CityId;
+                remainingOfficers.Remove(w);
+                fIdx = (fIdx + 1) % frontlineCities.Count;
+            }
+        }
+
+        // Step C: Bureaucrats and Leftovers to Safe Cities (or HQ)
+        var safeTargets = safeCities.Count > 0 ? safeCities : cities;
+        int sIdx = 0;
+        foreach (var off in remainingOfficers)
+        {
+            assignments[off.OfficerId] = safeTargets[sIdx].CityId;
+            sIdx = (sIdx + 1) % safeTargets.Count;
+        }
+
+        // 5. Execute Moves
+        using (var trans = conn.BeginTransaction())
+        {
+            foreach (var kvp in assignments)
+            {
+                var moveCmd = conn.CreateCommand();
+                moveCmd.CommandText = "UPDATE officers SET location_id = $loc WHERE officer_id = $oid";
+                moveCmd.Parameters.AddWithValue("$loc", kvp.Value);
+                moveCmd.Parameters.AddWithValue("$oid", kvp.Key);
+                moveCmd.ExecuteNonQuery();
+            }
+            trans.Commit();
+        }
+
+        GD.Print($"[Repositioning] Faction {factionId} reorganized {assignments.Count} officers across {cities.Count} cities.");
+    }
+
+    private class AI_City { public int CityId; public string Name; public bool IsHQ; public bool IsFrontline; public int GovernorId; }
+    private class AI_Officer_Stats { public int OfficerId; public string Name; public int Strength; public int Politics; public int Intelligence; public int Leadership; public bool IsCommander; public bool IsWarrior; }
+
     public async void ProcessTurn(int factionId)
     {
         try
@@ -26,6 +170,17 @@ public partial class FactionAI : Node
                 AssignOfficerTasks(conn, factionId);
 
                 var officers = GetOfficersWithAssignments(conn, factionId);
+                var leader = GetFactionLeader(conn, factionId);
+
+                // 1. Leader takes their turn first (Execute assignment if they have one)
+                var leaderOff = officers.FirstOrDefault(o => o.OfficerId == leader?.OfficerId);
+                if (leaderOff != null)
+                {
+                    ExecuteAssignment(conn, leaderOff);
+                    officers.Remove(leaderOff);
+                }
+
+                // 2. The rest of the AI in that Faction take their turns
                 foreach (var off in officers)
                 {
                     ExecuteAssignment(conn, off);
@@ -125,23 +280,22 @@ public partial class FactionAI : Node
             string task = weeklyTask.task;
             int targetId = weeklyTask.targetId;
 
-            // FORCE EVALUATION: Only send enough officers for 1.5x strength relative to target
             if (weeklyTask.task == "CaptureCity")
             {
-                int cityDef = GetCityDefenseStrength(conn, targetId);
-                int needed = (int)(cityDef * 1.5f);
+                int cityTroops = GetCityDefenseStrength(conn, targetId);
+                int neededTroops = (int)(cityTroops * 1.3f); // Aim for 30% superiority
 
                 // Get current force assigned to this target
-                int currentStr = 0;
+                int currentAssignedTroops = 0;
                 using (var countCmd = conn.CreateCommand())
                 {
-                    countCmd.CommandText = "SELECT SUM(strength) FROM officers WHERE (current_assignment = 'CaptureCity' OR current_assignment = 'SupportAttack') AND assignment_target_id = $tid";
+                    countCmd.CommandText = "SELECT SUM(troops) FROM officers WHERE (current_assignment = 'CaptureCity' OR current_assignment = 'SupportAttack') AND assignment_target_id = $tid";
                     countCmd.Parameters.AddWithValue("$tid", targetId);
                     var currentForce = countCmd.ExecuteScalar();
-                    currentStr = (currentForce != null && currentForce != DBNull.Value) ? Convert.ToInt32(currentForce) : 0;
+                    currentAssignedTroops = (currentForce != null && currentForce != DBNull.Value) ? Convert.ToInt32(currentForce) : 0;
                 }
 
-                if (currentStr >= needed)
+                if (currentAssignedTroops >= neededTroops && currentAssignedTroops > 0)
                 {
                     task = "DevelopEconomy"; // Diversify if we have enough force
                 }
@@ -185,31 +339,9 @@ public partial class FactionAI : Node
             if (leaderIsAssigned && leader.ActionPoints <= 1) break;
         }
 
-        if (leader.ActionPoints > 0)
-        {
-            int bestStat = Math.Max(leader.Intelligence, Math.Max(leader.Politics, Math.Max(leader.Strength, leader.Leadership)));
-            ActionManager.DomesticType? workType = null;
-            if (bestStat == leader.Intelligence) workType = ActionManager.DomesticType.Technology;
-            else if (bestStat == leader.Politics) workType = ActionManager.DomesticType.Commerce;
-            else if (bestStat == leader.Strength) workType = ActionManager.DomesticType.PublicOrder;
-            else if (bestStat == leader.Leadership) workType = ActionManager.DomesticType.Defense;
-
-            if (workType.HasValue)
-            {
-                var am = GetNode<ActionManager>("/root/ActionManager");
-                int locId = 0;
-                var locCmd = conn.CreateCommand();
-                locCmd.CommandText = "SELECT location_id FROM officers WHERE officer_id = $oid";
-                locCmd.Parameters.AddWithValue("$oid", leader.OfficerId);
-                locId = Convert.ToInt32(locCmd.ExecuteScalar());
-
-                while (leader.ActionPoints > 0)
-                {
-                    am.PerformDomesticAction(leader.OfficerId, locId, workType.Value);
-                    leader.ActionPoints--;
-                }
-            }
-        }
+        // Leader AP conservation: We do NOT burn remaining AP on domestic tasks here.
+        // Doing so would prevent the Leader from executing their assigned task (e.g. CaptureCity) in the main loop.
+        // Future improvement: Move 'Burn unused AP' logic to the end of the turn or into ExecuteAssignment.
     }
 
     private void ExecuteAssignment(SqliteConnection conn, AI_Officer officer)
@@ -249,14 +381,33 @@ public partial class FactionAI : Node
                 break;
             case "RecruitOfficer":
                 int roninId = FindRoninInCity(conn, officer.LocationId);
-                if (roninId > 0) am.PerformRecruit(officer.OfficerId, roninId);
+                if (roninId > 0)
+                {
+                    int gold = GetFactionGold(conn, officer.OfficerId);
+                    if (gold < 100)
+                    {
+                        GD.Print($"[AI Budget] {officer.Name} cannot afford to 'Wine & Dine' {roninId}. Talking instead.");
+                        am.PerformSocialTalk(officer.OfficerId, roninId);
+                    }
+                    else
+                        am.PerformRecruit(officer.OfficerId, roninId);
+                }
                 else am.PerformRest(officer.OfficerId);
                 break;
             case "Recruit":
-                // AI Army Building: Fill up to max troops with a random unit type
-                var roles = new UnitRole[] { UnitRole.FRONTLINE, UnitRole.CAVALRY, UnitRole.RANGED };
-                UnitRole selected = roles[new Random().Next(roles.Length)];
-                am.PerformRecruitTroops(officer.OfficerId, selected);
+                int currentGold = GetFactionGold(conn, officer.OfficerId);
+                if (currentGold < 200)
+                {
+                    GD.Print($"[AI Budget] {officer.Name} cannot afford troops. Developing Economy instead.");
+                    am.PerformDomesticAction(officer.OfficerId, officer.LocationId, ActionManager.DomesticType.Commerce);
+                }
+                else
+                {
+                    // AI Army Building: Fill up to max troops with a random unit type
+                    var roles = new UnitRole[] { UnitRole.FRONTLINE, UnitRole.CAVALRY, UnitRole.RANGED };
+                    UnitRole selected = roles[new Random().Next(roles.Length)];
+                    am.PerformRecruitTroops(officer.OfficerId, selected);
+                }
                 break;
             default:
                 if (new Random().NextDouble() > 0.7)
@@ -331,17 +482,57 @@ public partial class FactionAI : Node
 
     private int FindExpansionTarget(SqliteConnection conn, int factionId)
     {
+        // 1. Get Faction Cities
+        var myCities = new HashSet<int>();
         var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
-            SELECT c.city_id FROM routes r
-            JOIN cities c ON (CASE WHEN r.start_city_id IN (SELECT city_id FROM cities WHERE faction_id = $fid) THEN r.end_city_id ELSE r.start_city_id END) = c.city_id
-            WHERE (r.start_city_id IN (SELECT city_id FROM cities WHERE faction_id = $fid) OR r.end_city_id IN (SELECT city_id FROM cities WHERE faction_id = $fid))
-              AND c.faction_id != $fid
-            ORDER BY c.faction_id IS NULL DESC, (SELECT COUNT(*) FROM officers WHERE location_id = c.city_id) ASC
-            LIMIT 1";
+        cmd.CommandText = "SELECT city_id FROM cities WHERE faction_id = $fid";
         cmd.Parameters.AddWithValue("$fid", factionId);
-        var res = cmd.ExecuteScalar();
-        return res != null ? Convert.ToInt32(res) : 0;
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read()) myCities.Add(r.GetInt32(0));
+        }
+
+        if (myCities.Count == 0) return 0;
+
+        // 2. Find Neighbors via Routes (C# Logic avoids complex JOIN/CASE issues)
+        var neighbors = new HashSet<int>();
+        var routeCmd = conn.CreateCommand();
+        routeCmd.CommandText = "SELECT start_city_id, end_city_id FROM routes";
+
+        // Optimally we would filter in SQL, but reading all routes is fast enough for <100 cities.
+        // If map is huge, we should filter by start/end.
+        // Let's filter by start OR end in SQL for efficiency.
+        var cityList = string.Join(",", myCities);
+        routeCmd.CommandText = $"SELECT start_city_id, end_city_id FROM routes WHERE start_city_id IN ({cityList}) OR end_city_id IN ({cityList})";
+
+        using (var r = routeCmd.ExecuteReader())
+        {
+            while (r.Read())
+            {
+                int s = r.GetInt32(0);
+                int e = r.GetInt32(1);
+
+                if (myCities.Contains(s) && !myCities.Contains(e)) neighbors.Add(e);
+                else if (myCities.Contains(e) && !myCities.Contains(s)) neighbors.Add(s);
+            }
+        }
+
+        if (neighbors.Count == 0) return 0;
+
+        // 3. Score Neighbors (Neutral first, then weak garrison)
+        var neighborList = string.Join(",", neighbors);
+        var targetCmd = conn.CreateCommand();
+        targetCmd.CommandText = $@"
+            SELECT city_id FROM cities 
+            WHERE city_id IN ({neighborList}) 
+            AND (faction_id != $fid OR faction_id IS NULL)
+            ORDER BY (faction_id IS NULL) DESC, 
+                     (SELECT COUNT(*) FROM officers WHERE location_id = cities.city_id) ASC
+            LIMIT 1";
+        targetCmd.Parameters.AddWithValue("$fid", factionId);
+
+        var res = targetCmd.ExecuteScalar();
+        return res != null && res != DBNull.Value ? Convert.ToInt32(res) : 0;
     }
 
     private (string task, int targetId) GetWeeklyTask(SqliteConnection conn, int factionId)
@@ -454,13 +645,27 @@ public partial class FactionAI : Node
 
     private int GetCityDefenseStrength(SqliteConnection conn, int cityId)
     {
-        // Simple: Max strength of any officer in the city + 20 wall bonus
+        // City Defense = Sum of troops of all officers in the city + Militia Base (Bonus)
         var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT MAX(strength) FROM officers WHERE location_id = $cid";
+        cmd.CommandText = "SELECT SUM(troops) FROM officers WHERE location_id = $cid";
         cmd.Parameters.AddWithValue("$cid", cityId);
         var res = cmd.ExecuteScalar();
-        int maxStr = (res != null && res != DBNull.Value) ? Convert.ToInt32(res) : 0;
-        return maxStr + 20;
+        int totalTroops = (res != null && res != DBNull.Value) ? Convert.ToInt32(res) : 0;
+
+        // If it's a neutral town with no officers, it has default militia
+        if (totalTroops == 0)
+        {
+            var facCmd = conn.CreateCommand();
+            facCmd.CommandText = "SELECT faction_id FROM cities WHERE city_id = $cid";
+            facCmd.Parameters.AddWithValue("$cid", cityId);
+            var fRes = facCmd.ExecuteScalar();
+            if (fRes == null || fRes == DBNull.Value)
+            {
+                return 1500; // Default Militia Strength for neutral towns
+            }
+        }
+
+        return totalTroops + 500; // +500 for general garrison/walls
     }
 
     private int FindNextHopToward(SqliteConnection conn, int startId, int targetId, int officerId)
@@ -531,5 +736,14 @@ public partial class FactionAI : Node
         if (ratio < 0.25f) return true;
 
         return false;
+    }
+
+    private int GetFactionGold(SqliteConnection conn, int officerId)
+    {
+        var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT f.gold FROM factions f JOIN officers o ON f.faction_id = o.faction_id WHERE o.officer_id = $oid";
+        cmd.Parameters.AddWithValue("$oid", officerId);
+        var res = cmd.ExecuteScalar();
+        return (res != null && res != DBNull.Value) ? Convert.ToInt32(res) : 0;
     }
 }

@@ -129,7 +129,7 @@ public partial class CityMenu : Control
 				else if (isGov) prefix = "[Gov] ";
 				// Direct string usage, or title case if needed
 				btn.Text = $"{prefix}{name} ({rank}, {troops})";
-				btn.Alignment = HorizontalAlignment.Left;
+				btn.Alignment = HorizontalAlignment.Center;
 
 				// Apply Color to Text
 				btn.AddThemeColorOverride("font_color", new Color(hexColor));
@@ -163,6 +163,7 @@ public partial class CityMenu : Control
 		int playerId = GetPlayerId();
 		int cityId = GetCityId(_cityName);
 		long currentPlayerLoc = actionMgr.GetPlayerLocation(playerId);
+		int playerFaction = GetPlayerFaction(playerId);
 
 		// Context Logic
 		if (currentPlayerLoc == cityId)
@@ -175,6 +176,7 @@ public partial class CityMenu : Control
 				var label = new Label();
 				label.Text = "Battle Declared (End of Turn)";
 				label.Modulate = Colors.Orange;
+				label.HorizontalAlignment = HorizontalAlignment.Center;
 				ActionList.AddChild(label);
 			}
 			else
@@ -188,12 +190,28 @@ public partial class CityMenu : Control
 				// Wisdom / Personal Actions
 				AddActionButton("---------------", null); // Divider
 				AddActionButton("Rest (Heal Army)", nameof(OnRestPressed));
-				AddActionButton("Study Stats", nameof(OnStudyPressed));
+				AddActionButton("Train Stats", nameof(OnTrainPressed));
 
-				int playerFaction = GetPlayerFaction(playerId);
 				if (playerFaction > 0)
 				{
 					AddActionButton("Resign", nameof(OnResignPressed));
+				}
+				else // Ronin
+				{
+					if (CheckCityNeutral(cityId))
+					{
+						int playerRankLevel = GetPlayerRankLevel(playerId);
+						if (playerRankLevel >= 3)
+						{
+							AddActionButton("Rise Up (Found Faction)", nameof(OnRiseUpPressed));
+						}
+						else
+						{
+							// Optional: Show disabled or informative label? 
+							// User: "should only display if you can do it" -> so we hide it if rank is too low.
+							// But we could show a hint if nearby. For now, strict as requested.
+						}
+					}
 				}
 
 				AddActionButton("Close", nameof(OnClosePressed));
@@ -204,7 +222,7 @@ public partial class CityMenu : Control
 			// Outside City (Adjacent or Distant)
 
 			// 1. Check for Adjacent Hostile City -> Declare Attack
-			int playerFaction = GetPlayerFaction(playerId);
+			playerFaction = GetPlayerFaction(playerId);
 			int targetCityFaction = GetCityFaction(cityId);
 
 			if (playerFaction > 0 && playerFaction != targetCityFaction)
@@ -217,15 +235,6 @@ public partial class CityMenu : Control
 
 			AddActionButton("Travel Here (-1 AP)", nameof(OnTravelPressed));
 
-			// If Ronin and Neutral City -> Rise Up
-			if (playerFaction == 0)
-			{
-				bool isNeutral = CheckCityNeutral(cityId);
-				if (isNeutral)
-				{
-					AddActionButton("Rise Up (Found Faction)", nameof(OnRiseUpPressed));
-				}
-			}
 
 			AddActionButton("Close", nameof(OnClosePressed));
 		}
@@ -389,36 +398,86 @@ public partial class CityMenu : Control
 		RefreshData();
 	}
 
-	// Simple Study Toggle for now - Ideally a popup
-	private bool _showingStudy = false;
-	public void OnStudyPressed()
+	// Simple Train Toggle for now - Ideally a popup
+	private bool _showingTrain = false;
+	public void OnTrainPressed()
 	{
-		if (_showingStudy) { RefreshData(); _showingStudy = false; return; }
+		if (_showingTrain) { RefreshData(); _showingTrain = false; return; }
 
-		_showingStudy = true;
-		// Clear actions and show study options
+		_showingTrain = true;
+		// Clear actions and show train options
 		foreach (Node child in ActionList.GetChildren()) child.QueueFree();
 
-		AddActionButton("Study Leadership", nameof(OnStudyLea));
-		AddActionButton("Study Intelligence", nameof(OnStudyInt));
-		AddActionButton("Study Strength", nameof(OnStudyStr));
-		AddActionButton("Study Politics", nameof(OnStudyPol));
-		AddActionButton("Study Charisma", nameof(OnStudyCha));
+		AddActionButton("Train Leadership", nameof(OnTrainLea));
+		AddActionButton("Train Intelligence", nameof(OnTrainInt));
+		AddActionButton("Train Strength", nameof(OnTrainStr));
+		AddActionButton("Train Politics", nameof(OnTrainPol));
+		AddActionButton("Train Charisma", nameof(OnTrainCha));
 		AddActionButton("Back", nameof(RefreshData));
 	}
 
-	public void OnStudyLea() { DoStudy("Leadership"); }
-	public void OnStudyInt() { DoStudy("Intelligence"); }
-	public void OnStudyStr() { DoStudy("Strength"); }
-	public void OnStudyPol() { DoStudy("Politics"); }
-	public void OnStudyCha() { DoStudy("Charisma"); }
+	public void OnTrainLea() { DoTrain("Leadership"); }
+	public void OnTrainInt() { DoTrain("Intelligence"); }
+	public void OnTrainStr() { DoTrain("Strength"); }
+	public void OnTrainPol() { DoTrain("Politics"); }
+	public void OnTrainCha() { DoTrain("Charisma"); }
 
-	private void DoStudy(string stat)
+	private void DoTrain(string stat)
 	{
 		var actionMgr = GetNode<ActionManager>("/root/ActionManager");
 		int playerId = GetPlayerId();
-		actionMgr.PerformStudy(playerId, stat);
-		OnStudyPressed(); // Refresh study menu 
+
+		var mentors = actionMgr.GetPotentialMentors(playerId, stat);
+
+		// Clear Actions to show Mentors
+		foreach (Node child in ActionList.GetChildren()) child.QueueFree();
+
+		var header = new Label();
+		header.Text = $"Select a Mentor for {stat}:";
+		header.HorizontalAlignment = HorizontalAlignment.Center;
+		ActionList.AddChild(header);
+
+		if (mentors.Count == 0)
+		{
+			var lbl = new Label();
+			lbl.Text = "No capable mentors found in this city.";
+			lbl.Modulate = Colors.Red;
+			ActionList.AddChild(lbl);
+		}
+		else
+		{
+			foreach (var m in mentors)
+			{
+				// (int OfficerId, string Name, int StatValue, int Cost, int Relation)
+				var btn = new Button();
+				btn.Text = $"{m.Name} (Stat: {m.StatValue}, Cost: {m.Cost}g)";
+
+				// Optional: Color code based on Relation?
+				if (m.Relation >= 80) btn.Modulate = Colors.Green;
+				else if (m.Relation <= 20) btn.Modulate = Colors.Salmon;
+
+				// Capture variables for closure
+				int mId = m.OfficerId;
+				string statName = stat;
+
+				btn.Pressed += () => ExecuteTrain(mId, statName);
+				ActionList.AddChild(btn);
+			}
+		}
+
+		AddActionButton("Back", nameof(OnTrainPressed));
+	}
+
+	private void ExecuteTrain(int mentorId, string stat)
+	{
+		var actionMgr = GetNode<ActionManager>("/root/ActionManager");
+		int playerId = GetPlayerId();
+		actionMgr.PerformTrain(playerId, mentorId, stat);
+
+		// Refresh whole menu or go back to study?
+		// Let's go back to Study menu to see updated stats maybe? Or just refresh data.
+		RefreshData();
+		_showingTrain = false; // Reset toggle so next click opens menu fresh
 	}
 
 	private bool CheckCityNeutral(int cityId)
@@ -491,5 +550,23 @@ public partial class CityMenu : Control
 		}
 	}
 
+
+	private int GetPlayerRankLevel(int officerId)
+	{
+		string dbPath = System.IO.Path.Combine(ProjectSettings.GlobalizePath("res://"), "../tree_kingdoms.db");
+		using (var conn = new SqliteConnection($"Data Source={dbPath}"))
+		{
+			conn.Open();
+			var cmd = conn.CreateCommand();
+			cmd.CommandText = "SELECT rank FROM officers WHERE officer_id = $oid";
+			cmd.Parameters.AddWithValue("$oid", officerId);
+			var res = cmd.ExecuteScalar();
+			if (res != null)
+			{
+				return GameConstants.GetRankLevel((string)res);
+			}
+			return 0;
+		}
+	}
 
 }

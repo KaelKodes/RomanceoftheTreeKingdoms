@@ -42,21 +42,24 @@ public partial class BattleManager : Node
 		CurrentContext.LocationId = cityId;
 		CurrentContext.SourceCityId = sourceCityId;
 
-		// Fetch LeaderId from pending_battles if possible
+		// Fetch LeaderId and AttackerFactionId from pending_battles if possible
 		if (sourceCityId > 0)
 		{
 			using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
 			{
 				conn.Open();
 				var cmd = conn.CreateCommand();
-				cmd.CommandText = "SELECT leader_id FROM pending_battles WHERE location_id = $lid AND source_location_id = $sid";
+				cmd.CommandText = "SELECT leader_id, attacker_faction_id FROM pending_battles WHERE location_id = $lid AND source_location_id = $sid";
 				cmd.Parameters.AddWithValue("$lid", cityId);
 				cmd.Parameters.AddWithValue("$sid", sourceCityId);
-				var res = cmd.ExecuteScalar();
-				if (res != null && res != DBNull.Value)
+				using (var reader = cmd.ExecuteReader())
 				{
-					CurrentContext.LeaderId = Convert.ToInt32(res);
-					GD.Print($"[BattleManager] Attack Leader Identified: {CurrentContext.LeaderId}");
+					if (reader.Read())
+					{
+						CurrentContext.LeaderId = reader.GetInt32(0);
+						CurrentContext.AttackerFactionId = reader.IsDBNull(1) ? 0 : reader.GetInt32(1);
+						GD.Print($"[BattleManager] Attack Identified: Leader={CurrentContext.LeaderId}, Faction={CurrentContext.AttackerFactionId}");
+					}
 				}
 			}
 		}
@@ -240,20 +243,40 @@ public partial class BattleManager : Node
 		CurrentContext.AttackerOfficers = new List<BattleOfficer>();
 		CurrentContext.DefenderOfficers = new List<BattleOfficer>();
 
+		int attId = CurrentContext.AttackerFactionId;
 		int defId = CurrentContext.OwnerFactionId;
 		CurrentContext.DefenderFactionId = defId;
 
 		// 1. Separate Known Faction Members
 		var ronin = new List<BattleOfficer>();
+		var otherFactions = new List<BattleOfficer>();
+
 		foreach (var off in CurrentContext.AllOfficers)
 		{
 			if (off.FactionId == defId && defId > 0)
 			{
-				CurrentContext.DefenderOfficers.Add(off);
+				// Step 5: Any faction defending its city will assign all officers with any troops
+				if (off.Troops > 0)
+					CurrentContext.DefenderOfficers.Add(off);
 			}
-			else if (off.FactionId > 0 || off.IsPlayer) // Faction members (not defenders) or Player
+			else if (off.FactionId == attId && attId > 0)
 			{
-				CurrentContext.AttackerOfficers.Add(off);
+				// Step 4: All Assigned Officers are present at the Attack From City - They all Join
+				if (off.Troops > 0)
+					CurrentContext.AttackerOfficers.Add(off);
+			}
+			else if (off.FactionId > 0)
+			{
+				otherFactions.Add(off);
+			}
+			else if (off.IsPlayer)
+			{
+				// Player handling (already set in context or needs logic?)
+				// Default: If player is in either group, they are already sorted. 
+				// If player is independent, they go to Ronin logic.
+				if (off.FactionId == defId) CurrentContext.DefenderOfficers.Add(off);
+				else if (off.FactionId == attId) CurrentContext.AttackerOfficers.Add(off);
+				else ronin.Add(off);
 			}
 			else
 			{
@@ -261,52 +284,64 @@ public partial class BattleManager : Node
 			}
 		}
 
-		// 2. Handle Ronin Participation (Rare/Relationship based)
+		// 2. Handle Ronin Participation (Step 6) - Make it very rare!
+		var rng = new Random();
 		foreach (var r in ronin)
 		{
+			// user says "very rare". 5% chance to even consider joining.
+			if (rng.NextDouble() > 0.05)
+			{
+				GD.Print($"[Battle] Ronin {r.Name} stays neutral (Very Rare Join Check).");
+				continue;
+			}
+
 			// Check relation with Defenders
 			int defenderCount = CurrentContext.DefenderOfficers.Count;
-			if (defenderCount > 0)
-			{
-				int totalRel = 0;
-				foreach (var def in CurrentContext.DefenderOfficers)
-				{
-					totalRel += RelationshipManager.Instance.GetRelation(r.OfficerId, def.OfficerId);
-				}
-				int avgRel = totalRel / defenderCount;
+			int attCount = CurrentContext.AttackerOfficers.Count;
 
-				if (avgRel > 45)
-				{
-					GD.Print($"[Battle] Ronin {r.Name} joins DEFENDERS due to friendship (Avg Rel: {avgRel})");
-					CurrentContext.DefenderOfficers.Add(r);
-				}
-				else if (avgRel < -45)
-				{
-					GD.Print($"[Battle] Ronin {r.Name} joins ATTACKERS due to grudge (Avg Rel: {avgRel})");
-					CurrentContext.AttackerOfficers.Add(r);
-				}
-				else
-				{
-					GD.Print($"[Battle] Ronin {r.Name} stays neutral.");
-				}
-			}
-			else if (defId == 0) // Neutral Town - Ronin here are basically defenders/residents
+			int defRel = (defenderCount > 0) ? CalculateAvgRelation(r.OfficerId, CurrentContext.DefenderOfficers) : 0;
+			int attRel = (attCount > 0) ? CalculateAvgRelation(r.OfficerId, CurrentContext.AttackerOfficers) : 0;
+
+			if (defRel > 70 && defRel > attRel)
 			{
-				// If it's a neutral town, Ronin in the town ARE the defenders (acting as militia leaders)
+				GD.Print($"[Battle] Ronin {r.Name} joins DEFENDERS (High Rel: {defRel})");
 				CurrentContext.DefenderOfficers.Add(r);
 			}
+			else if (attRel > 70 && attRel > defRel)
+			{
+				GD.Print($"[Battle] Ronin {r.Name} joins ATTACKERS (High Rel: {attRel})");
+				CurrentContext.AttackerOfficers.Add(r);
+			}
 		}
 
-		// 3. Determine Primary Attacker Faction
-		var primaryAttacker = CurrentContext.AttackerOfficers.FirstOrDefault(o => o.FactionId > 0);
-		if (primaryAttacker != null)
+		// 3. Handle Other Factions (Mercenaries?) - Similar rare logic
+		foreach (var o in otherFactions)
 		{
-			CurrentContext.AttackerFactionId = primaryAttacker.FactionId;
+			if (rng.NextDouble() > 0.05) continue;
+
+			int defRel = CalculateAvgRelation(o.OfficerId, CurrentContext.DefenderOfficers);
+			int attRel = CalculateAvgRelation(o.OfficerId, CurrentContext.AttackerOfficers);
+
+			if (defRel > 75 && defRel > attRel) CurrentContext.DefenderOfficers.Add(o);
+			else if (attRel > 75 && attRel > defRel) CurrentContext.AttackerOfficers.Add(o);
 		}
-		else if (CurrentContext.AttackerOfficers.Count > 0)
+
+		// Ensure primary attacker faction is set for context if not already
+		if (CurrentContext.AttackerFactionId <= 0 && CurrentContext.AttackerOfficers.Count > 0)
 		{
 			CurrentContext.AttackerFactionId = CurrentContext.AttackerOfficers[0].FactionId;
 		}
+	}
+
+	private int CalculateAvgRelation(int officerId, List<BattleOfficer> group)
+	{
+		if (group.Count == 0) return 0;
+		int total = 0;
+		foreach (var member in group)
+		{
+			total += RelationshipManager.Instance.GetRelation(officerId, member.OfficerId);
+		}
+		return total / group.Count;
 	}
 
 	private void GenerateObjective()
@@ -382,6 +417,8 @@ public partial class BattleManager : Node
 				}
 			}
 			GD.Print($"City {CurrentContext.CityName} is now owned by Faction {winnerFaction}!");
+
+			ActionManager.Instance.EmitSignal(ActionManager.SignalName.MapStateChanged);
 
 			// Handle Retreats / Defeat
 			HandlePostBattleConsequences(loserFaction, CurrentContext.LocationId, CurrentContext.AttackerFactionId);
@@ -460,95 +497,22 @@ public partial class BattleManager : Node
 					attrCmd.Parameters.AddWithValue("$t", Math.Max(0, w.Troops));
 					attrCmd.Parameters.AddWithValue("$oid", w.OfficerId);
 					attrCmd.ExecuteNonQuery();
+
+					// Promotion Check
+					ActionManager.Instance.CheckPromotions(w.OfficerId, conn);
 				}
 
 				trans.Commit();
 				GD.Print($"Battle Rep Awarded: {repGain} (Commander Bonus: {defeatedCommander})");
 
-				// ADVANCE ON WIN: If attackers won, move them into the city
+				// ADVANCE ON WIN: If attackers won, move them into the city using the unified helper
 				if (attackersWon)
 				{
-					int sourceCityId = CurrentContext.SourceCityId;
-					int leaderId = CurrentContext.LeaderId;
-					int targetCityId = CurrentContext.LocationId;
-
-					// 1. Fetch source city governor
-					int sourceGovernorId = -1;
-					var govCmd = conn.CreateCommand();
-					govCmd.CommandText = "SELECT governor_id FROM cities WHERE city_id = $cid";
-					govCmd.Parameters.AddWithValue("$cid", sourceCityId);
-					var sourceGovRes = govCmd.ExecuteScalar();
-					if (sourceGovRes != null && sourceGovRes != DBNull.Value) sourceGovernorId = Convert.ToInt32(sourceGovRes);
-
-					// 2. Identify Faction Leader
-					int factionLeaderId = -1;
-					var leaderCmd = conn.CreateCommand();
-					leaderCmd.CommandText = "SELECT leader_id FROM factions WHERE faction_id = $fid";
-					leaderCmd.Parameters.AddWithValue("$fid", winnerFaction);
-					var fLeaderRes = leaderCmd.ExecuteScalar();
-					if (fLeaderRes != null && fLeaderRes != DBNull.Value) factionLeaderId = Convert.ToInt32(fLeaderRes);
-
-					// 3. Appoint New Governor for captured city
-					// Priority: Highest rank among winners who isn't already the Faction Leader or the Source Governor.
-					// Actually, the user says "appoints someone from the attack force". 
-					// We'll pick the highest rank (Rank > Charisma)
-					var potentialNewGovs = realWinners
-						.OrderByDescending(o => o.OfficerId == factionLeaderId ? 10 : 0) // Prefer Leader? No, User says Leader appoints someone.
-						.OrderByDescending(o => GetRankLevel(o.Rank))
-						.ThenByDescending(o => o.Charisma)
-						.ToList();
-
-					int newGovernorId = -1;
-					if (potentialNewGovs.Any())
-					{
-						// If Faction Leader is in the group, they are the boss, but we need a "Governor" for the town.
-						// User: "Leader appoints someone... should they win".
-						// We'll pick the best non-leader if possible, else the leader.
-						var bestNonLeader = potentialNewGovs.FirstOrDefault(o => o.OfficerId != factionLeaderId);
-						newGovernorId = (bestNonLeader != null) ? bestNonLeader.OfficerId : factionLeaderId;
-					}
-
-					if (newGovernorId != -1)
-					{
-						ExecuteSql(conn, $"UPDATE cities SET governor_id = {newGovernorId} WHERE city_id = {targetCityId}");
-						GD.Print($"[Governor] {potentialNewGovs.First(o => o.OfficerId == newGovernorId).Name} appointed as Governor of {CurrentContext.CityName}.");
-					}
-
-					// 4. Movement Logic
-					foreach (var attacker in realWinners)
-					{
-						bool isFactionLeader = attacker.OfficerId == factionLeaderId;
-						bool isSourceGovernor = attacker.OfficerId == sourceGovernorId;
-						bool isNewGovernor = attacker.OfficerId == newGovernorId;
-
-						// Rules:
-						// - Source Governor MUST stay behind to protect the source city (even if leader).
-						// - New Governor must move to their new city.
-						// - Others move by default to occupy.
-
-						bool shouldMove = true;
-
-						if (isSourceGovernor)
-						{
-							shouldMove = false; // Governor stays behind
-						}
-
-						// Exception: If the New Governor was also the Source Governor (weird but possible), they move.
-						if (isNewGovernor) shouldMove = true;
-
-						if (shouldMove)
-						{
-							ExecuteSql(conn, $"UPDATE officers SET location_id = {targetCityId} WHERE officer_id = {attacker.OfficerId}");
-							GD.Print($"{attacker.Name} advances into {CurrentContext.CityName}.");
-						}
-						else
-						{
-							GD.Print($"{attacker.Name} (Governor) remains in the source city to maintain order.");
-						}
-					}
+					ApplyPostBattleMovement(conn, winnerFaction, CurrentContext.SourceCityId, CurrentContext.LocationId, realWinners);
 				}
 			}
 		}
+
 
 		if (realWinners.Count > 0 && prizePool > 0)
 		{
@@ -577,60 +541,28 @@ public partial class BattleManager : Node
 	{
 		GD.Print($"Simulating AI Battle @ City {cityId}...");
 
+		// Use context if it exists and matches
+		if (CurrentContext == null || CurrentContext.LocationId != cityId)
+		{
+			CreateContext(cityId); // Fallback
+		}
+
 		using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
 		{
 			conn.Open();
 
-			// 1. Identify Attacker Faction
-			var facCmd = conn.CreateCommand();
-			facCmd.CommandText = "SELECT faction_id FROM officers WHERE officer_id = $oid";
-			facCmd.Parameters.AddWithValue("$oid", primaryAttackerId);
-			var facRes = facCmd.ExecuteScalar();
-			int attackerFaction = (facRes != null && facRes != DBNull.Value) ? Convert.ToInt32(facRes) : 0;
+			// 1. Participant Lists from Context
+			var attackers = CurrentContext.AttackerOfficers;
+			var defenders = CurrentContext.DefenderOfficers;
 
-			var cityFacCmd = conn.CreateCommand();
-			cityFacCmd.CommandText = "SELECT faction_id FROM cities WHERE city_id = $cid";
-			cityFacCmd.Parameters.AddWithValue("$cid", cityId);
-			var cityFacRes = cityFacCmd.ExecuteScalar();
-			int defenderFaction = (cityFacRes != null && cityFacRes != DBNull.Value) ? Convert.ToInt32(cityFacRes) : 0;
+			int attackerFaction = CurrentContext.AttackerFactionId;
+			int defenderFaction = CurrentContext.DefenderFactionId;
 
 			if (attackerFaction == defenderFaction && attackerFaction > 0) return;
 
-			// 2. Gather Participants and Strengths
-			// Attackers: Primary + Any others of same faction in adjacent cities
-			var attackers = new List<(int id, string name, int str, int troops)>();
-			var attListCmd = conn.CreateCommand();
-			attListCmd.CommandText = @"
-				SELECT DISTINCT o.officer_id, o.name, o.strength, o.troops 
-				FROM officers o
-				LEFT JOIN routes r ON (o.location_id = r.start_city_id AND r.end_city_id = $cid) 
-				                   OR (o.location_id = r.end_city_id AND r.start_city_id = $cid)
-				WHERE (o.officer_id = $pid) OR (o.faction_id = $fid AND (o.location_id = $cid OR r.route_id IS NOT NULL))";
-			attListCmd.Parameters.AddWithValue("$cid", cityId);
-			attListCmd.Parameters.AddWithValue("$fid", attackerFaction);
-			attListCmd.Parameters.AddWithValue("$pid", primaryAttackerId);
-
-			using (var r = attListCmd.ExecuteReader())
-			{
-				while (r.Read()) attackers.Add((Convert.ToInt32(r.GetValue(0)), r.GetString(1), Convert.ToInt32(r.GetValue(2)), Convert.ToInt32(r.GetValue(3))));
-			}
-
-			// Defenders: All officers in the city (if defenderFaction > 0) or Militia (if 0)
-			var defenders = new List<(int id, string name, int str, int troops)>();
-			if (defenderFaction > 0)
-			{
-				var defListCmd = conn.CreateCommand();
-				defListCmd.CommandText = "SELECT officer_id, name, strength, troops FROM officers WHERE location_id = $cid AND faction_id = $fid";
-				defListCmd.Parameters.AddWithValue("$cid", cityId);
-				defListCmd.Parameters.AddWithValue("$fid", defenderFaction);
-				using (var r = defListCmd.ExecuteReader())
-				{
-					while (r.Read()) defenders.Add((Convert.ToInt32(r.GetValue(0)), r.GetString(1), Convert.ToInt32(r.GetValue(2)), Convert.ToInt32(r.GetValue(3))));
-				}
-			}
-
-			long totalAttStr = attackers.Sum(a => a.str);
-			long totalDefStr = defenders.Sum(d => d.str) + 20; // 20 for City Walls/Militia Base
+			// 2. Calculate Strengths
+			long totalAttStr = attackers.Sum(a => (long)a.Strength + (a.Troops / 100)); // Strength + Troop weight
+			long totalDefStr = defenders.Sum(d => (long)d.Strength + (d.Troops / 100)) + 20; // 20 for City Walls/Militia Base
 
 			if (defenders.Count == 0 && defenderFaction == 0) totalDefStr = 40; // Neutral Town Militia Strength
 
@@ -640,33 +572,42 @@ public partial class BattleManager : Node
 
 			GD.Print($"Auto-Resolve: Attackers({totalAttStr}) vs Defenders({totalDefStr}) -> {(attackerWins ? "Win" : "Loss")}");
 
-			// 4. Apply Persistent Damage (Literal)
+			// 4. Apply Persistent Damage & Reputation (Step 8/9/12)
 			// Winner loses 10-30%, Loser loses 70-90%
 			float winnerLossMult = 0.1f + (float)new Random().NextDouble() * 0.2f;
 			float loserLossMult = 0.7f + (float)new Random().NextDouble() * 0.2f;
 
 			foreach (var att in attackers)
 			{
-				int newTroops = (int)(att.troops * (attackerWins ? (1.0f - winnerLossMult) : (1.0f - loserLossMult)));
-				ExecuteSql(conn, $"UPDATE officers SET troops = {newTroops} WHERE officer_id = {att.id}");
+				int newTroops = (int)(att.Troops * (attackerWins ? (1.0f - winnerLossMult) : (1.0f - loserLossMult)));
+				int repGain = attackerWins ? 50 : 5;
+				ExecuteSql(conn, $"UPDATE officers SET troops = {newTroops}, reputation = reputation + {repGain} WHERE officer_id = {att.OfficerId}");
+				ActionManager.Instance.CheckPromotions(att.OfficerId, conn);
 			}
 
 			foreach (var def in defenders)
 			{
-				int newTroops = (int)(def.troops * (attackerWins ? (1.0f - loserLossMult) : (1.0f - winnerLossMult)));
-				ExecuteSql(conn, $"UPDATE officers SET troops = {newTroops} WHERE officer_id = {def.id}");
+				int newTroops = (int)(def.Troops * (!attackerWins ? (1.0f - winnerLossMult) : (1.0f - loserLossMult)));
+				int repGain = !attackerWins ? 50 : 5;
+				ExecuteSql(conn, $"UPDATE officers SET troops = {newTroops}, reputation = reputation + {repGain} WHERE officer_id = {def.OfficerId}");
+				ActionManager.Instance.CheckPromotions(def.OfficerId, conn);
 			}
 
-			// 5. Cleanup / Capture
+			// 5. Cleanup / Capture (Step 9-10)
 			if (attackerWins)
 			{
 				ExecuteSql(conn, $"UPDATE cities SET faction_id = {(attackerFaction > 0 ? attackerFaction.ToString() : "NULL")}, is_hq = 0 WHERE city_id = {cityId}");
 				if (defenderFaction > 0) UpdateCityFactionOpinionDirect(conn, cityId, defenderFaction, -15);
 
-				foreach (var att in attackers) ExecuteSql(conn, $"UPDATE officers SET location_id = {cityId} WHERE officer_id = {att.id}");
+				// Unified Movement Logic for AI Sim
+				ApplyPostBattleMovement(conn, attackerFaction, CurrentContext.SourceCityId, cityId, attackers);
+
 				GD.Print($"City {cityId} Captured by Faction {attackerFaction}!");
+				ActionManager.Instance.EmitSignal(ActionManager.SignalName.MapStateChanged);
 				HandlePostBattleConsequences(defenderFaction, cityId, attackerFaction);
 			}
+
+
 		}
 	}
 
@@ -754,17 +695,17 @@ public partial class BattleManager : Node
 				GD.Print($"Faction {defeatedFactionId} has been ELIMINATED! {freed} officers are now Ronin.");
 
 				// PLAYER AP REWARD: If player's faction defeated this faction, +1 Max AP (Cap 5)
-				AwardPlayerDefeatBonus(winnerFactionId);
-			}
-		}
-	}
-	private void AwardPlayerDefeatBonus(int winnerFactionId)
-	{
-		if (winnerFactionId <= 0) return;
+                AwardPlayerDefeatBonus(winnerFactionId);
+            }
+        }
+    }
+    private void AwardPlayerDefeatBonus(int winnerFactionId)
+    {
+        if (winnerFactionId <= 0) return;
 
-		using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
-		{
-			conn.Open();
+        using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            conn.Open();
 			// 1. Get player's faction
 			var pCmd = conn.CreateCommand();
 			pCmd.CommandText = "SELECT faction_id, max_action_points FROM officers WHERE is_player = 1";
@@ -802,7 +743,101 @@ public partial class BattleManager : Node
 		GD.Print($"Officer {officerId} earned {amount} Gold!");
 	}
 
+	private void ApplyPostBattleMovement(SqliteConnection conn, int winnerFactionId, int sourceCityId, int targetCityId, List<BattleOfficer> winners)
+	{
+		if (winnerFactionId <= 0) return;
+
+		// 1. Fetch Source City Governor
+		int sourceGovernorId = -1;
+		using (var govCmd = conn.CreateCommand())
+		{
+			govCmd.CommandText = "SELECT governor_id FROM cities WHERE city_id = $cid";
+			govCmd.Parameters.AddWithValue("$cid", sourceCityId);
+			var res = govCmd.ExecuteScalar();
+			if (res != null && res != DBNull.Value) sourceGovernorId = Convert.ToInt32(res);
+		}
+
+		// 2. Identify Faction Leader and HQ
+		int factionLeaderId = -1;
+		int hqCityId = -1;
+		using (var leaderCmd = conn.CreateCommand())
+		{
+			leaderCmd.CommandText = "SELECT leader_id FROM factions WHERE faction_id = $fid";
+			leaderCmd.Parameters.AddWithValue("$fid", winnerFactionId);
+			var res = leaderCmd.ExecuteScalar();
+			if (res != null && res != DBNull.Value) factionLeaderId = Convert.ToInt32(res);
+		}
+
+		using (var hqCmd = conn.CreateCommand())
+		{
+			hqCmd.CommandText = "SELECT city_id FROM cities WHERE faction_id = $fid AND is_hq = 1 LIMIT 1";
+			hqCmd.Parameters.AddWithValue("$fid", winnerFactionId);
+			var res = hqCmd.ExecuteScalar();
+			if (res != null && res != DBNull.Value) hqCityId = Convert.ToInt32(res);
+			else hqCityId = sourceCityId; // Fallback
+		}
+
+		// 3. Appoint New Governor for captured city
+		var potentialNewGovs = winners
+			.OrderByDescending(o => o.OfficerId == factionLeaderId ? -10 : 0) // Avoid leader as governor
+			.OrderByDescending(o => GetRankLevel(o.Rank))
+			.ThenByDescending(o => o.Charisma)
+			.ToList();
+
+		int newGovernorId = -1;
+		if (potentialNewGovs.Any())
+		{
+			var bestNonLeader = potentialNewGovs.FirstOrDefault(o => o.OfficerId != factionLeaderId);
+			newGovernorId = (bestNonLeader != null) ? bestNonLeader.OfficerId : factionLeaderId;
+		}
+
+		if (newGovernorId != -1)
+		{
+			ExecuteSql(conn, $"UPDATE cities SET governor_id = {newGovernorId} WHERE city_id = {targetCityId}");
+			var gov = winners.FirstOrDefault(w => w.OfficerId == newGovernorId);
+			if (gov != null) GD.Print($"[Governor] {gov.Name} appointed as Governor of City {targetCityId}.");
+		}
+
+		// 4. Execute Movement
+		foreach (var winner in winners)
+		{
+			if (winner.OfficerId <= 0) continue;
+
+			bool isFactionLeader = winner.OfficerId == factionLeaderId;
+			bool isSourceGovernor = winner.OfficerId == sourceGovernorId;
+			bool isNewGovernor = winner.OfficerId == newGovernorId;
+
+			// Scenario Logic:
+			// - New Governor MUST stay in the Target City
+			// - Source Governor MUST return/stay in Source City
+			// - Faction Leader (if not governor) SHOULD return to HQ
+			// - Others advance to Target City
+
+			if (isNewGovernor)
+			{
+				ExecuteSql(conn, $"UPDATE officers SET location_id = {targetCityId} WHERE officer_id = {winner.OfficerId}");
+				GD.Print($"{winner.Name} (New Governor) takes post at City {targetCityId}.");
+			}
+			else if (isSourceGovernor)
+			{
+				ExecuteSql(conn, $"UPDATE officers SET location_id = {sourceCityId} WHERE officer_id = {winner.OfficerId}");
+				GD.Print($"{winner.Name} (Source Governor) returns to City {sourceCityId}.");
+			}
+			else if (isFactionLeader)
+			{
+				ExecuteSql(conn, $"UPDATE officers SET location_id = {hqCityId} WHERE officer_id = {winner.OfficerId}");
+				GD.Print($"{winner.Name} (Faction Leader) returns to HQ at City {hqCityId}.");
+			}
+			else
+			{
+				ExecuteSql(conn, $"UPDATE officers SET location_id = {targetCityId} WHERE officer_id = {winner.OfficerId}");
+				GD.Print($"{winner.Name} advances into City {targetCityId}.");
+			}
+		}
+	}
+
 	private void UpdateCityFactionOpinionDirect(SqliteConnection conn, int cityId, int factionId, int delta)
+
 	{
 		var cmd = conn.CreateCommand();
 		cmd.CommandText = "SELECT officer_id FROM officers WHERE location_id = $cid";

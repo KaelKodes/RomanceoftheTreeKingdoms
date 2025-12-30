@@ -5,7 +5,7 @@ import os
 sys.path.append(os.getcwd())
 
 from src.database.db_manager import db
-from src.database.models import Faction, UnitType, UnitRole, Officer, City
+from src.database.models import Faction, UnitType, UnitRole, Officer, City, GameState, FactionRelation, PendingBattle, Route, BattleMapTemplate, BattleNodeTemplate, BattleLinkTemplate
 
 def seed():
     print("Initializing Database...")
@@ -13,6 +13,14 @@ def seed():
     session = db.get_session()
     
     # 1. Clear existing data
+    print("  Clearing existing data...")
+    session.query(PendingBattle).delete()
+    session.query(FactionRelation).delete()
+    session.query(GameState).delete()
+    session.query(Route).delete()
+    session.query(BattleLinkTemplate).delete()
+    session.query(BattleNodeTemplate).delete()
+    session.query(BattleMapTemplate).delete()
     session.query(Officer).delete()
     session.query(City).delete()
     session.query(UnitType).delete()
@@ -135,6 +143,12 @@ def seed():
             current_action_points=5,
             max_action_points=5
         )
+        # Initialize baselines
+        cmd.base_leadership = cmd.leadership
+        cmd.base_intelligence = cmd.intelligence
+        cmd.base_strength = cmd.strength
+        cmd.base_politics = cmd.politics
+        cmd.base_charisma = cmd.charisma
         officers.append(cmd)
         
         # 5b. Assign 1-3 Sub-officers to Commander
@@ -155,6 +169,12 @@ def seed():
                 current_action_points=3,
                 max_action_points=3
             )
+            # Initialize baselines
+            sub.base_leadership = sub.leadership
+            sub.base_intelligence = sub.intelligence
+            sub.base_strength = sub.strength
+            sub.base_politics = sub.politics
+            sub.base_charisma = sub.charisma
             officers.append(sub)
 
     # 5c. Create Random Officers (Dispersed)
@@ -175,6 +195,13 @@ def seed():
             troops=100,
             max_troops=100
         )
+        # Initialize baselines
+        no.base_leadership = no.leadership
+        no.base_intelligence = no.intelligence
+        no.base_strength = no.strength
+        no.base_politics = no.politics
+        no.base_charisma = no.charisma
+        
         if random.random() < 0.3: # 30% chance to be already in a faction
             no.faction = random.choice([loyalists, separatists, coalition])
             
@@ -185,7 +212,6 @@ def seed():
 
     # 6. Create Routes (The Web)
     print("  Creating Routes...")
-    from src.database.models import Route
     
     session.query(Route).delete() 
     
@@ -209,7 +235,8 @@ def seed():
     connect("Eldershade", "South Fields", 1.0, "Road", False) # Corrected to match image
     connect("Eldershade", "River Port", 1.5, "Road", False) # New Connection
     
-    connect("Mistwood", "River Port", 2.0, "River", False)
+    # connect("Mistwood", "River Port", 2.0, "River", False) # REMOVED: Per User Request
+    connect("Mistwood", "South Fields", 2.0, "Road", False) # ADDED: Per User Request
     connect("River Port", "Sun Capital", 1.0, "Highway", False)
     
     # West/East Flanks
@@ -226,7 +253,6 @@ def seed():
 
     # 7. Create Battle Templates (Seed Maps)
     print("  Creating Battle Templates...")
-    from src.database.models import BattleMapTemplate, BattleNodeTemplate, BattleLinkTemplate
     
     # 7a. Template: Standard Plains
     plains = BattleMapTemplate(name="Standard Plains", terrain_type="Plains", map_type="Open Field")

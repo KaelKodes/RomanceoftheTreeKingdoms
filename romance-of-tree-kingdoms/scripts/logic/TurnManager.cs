@@ -30,62 +30,71 @@ public partial class TurnManager : Node
 	// Called by ActionManager.EndDay or directly from UI "End Turn" button
 	// But wait, user ends *their* turn. System ends *Day*.
 	// Let's separate it. 
-	// StartTurnCycle() -> logic -> EndTurn() -> Next...
+    // StartTurnCycle() -> logic -> EndTurn() -> Next...
 
-	public void EnsureTurnSystemStarted()
-	{
-		if (_turnQueue.Count == 0)
-		{
-			GD.Print("Turn System Not Started. Initializing...");
-			StartNewDay();
-		}
-	}
+    public void EnsureTurnSystemStarted()
+    {
+        if (_turnQueue.Count == 0)
+        {
+            GD.Print("Turn System Not Started. Initializing...");
+            StartNewDay();
+        }
+    }
 
-	public void StartNewDay()
-	{
-		int currentDay = GetCurrentDay();
+    public void StartNewDay()
+    {
+        int currentDay = GetCurrentDay();
 
-		// If Day 1 or (Day-1) % 7 == 0 (Weeks start on 1, 8, 15), Re-roll Initiative
-		if (currentDay == 1 || (currentDay - 1) % 7 == 0)
-		{
-			RollInitiative();
-			EmitSignal(SignalName.NewWeekStarted);
+        // If Day 1 or (Day-1) % 7 == 0 (Weeks start on 1, 8, 15), Re-roll Initiative
+        if (currentDay == 1 || (currentDay - 1) % 7 == 0)
+        {
+            RollInitiative();
+            EmitSignal(SignalName.NewWeekStarted);
 
-			// AI Strategic Refresh
-			var ai = GetNode<FactionAI>("/root/FactionAI");
-			using (var conn = DatabaseHelper.GetConnection())
-			{
-				conn.Open();
+            // AI Strategic Refresh & Repositioning
+            var ai = GetNode<FactionAI>("/root/FactionAI");
+            using (var conn = DatabaseHelper.GetConnection())
+            {
+                conn.Open();
+                var cmd = conn.CreateCommand();
+                cmd.CommandText = "SELECT faction_id FROM factions";
+                var fids = new List<int>();
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read()) fids.Add(r.GetInt32(0));
+                }
 
-				// Monthly Cycle (approx 4 weeks)
-				if (currentDay == 1 || (currentDay - 1) % 28 == 0)
-				{
-					GD.Print("[TurnManager] NEW MONTH! Refreshing Strategic Goals...");
-					RefreshAllFactionGoals(conn, ai, true);
-				}
-				else
-				{
-					GD.Print("[TurnManager] NEW WEEK! Refreshing Weekly Tasks...");
-					RefreshAllFactionGoals(conn, ai, false);
-				}
-			}
-		}
+                // Monthly Cycle (approx 4 weeks)
+                if (currentDay == 1 || (currentDay - 1) % 28 == 0)
+                {
+                    GD.Print("[TurnManager] NEW MONTH! Refreshing Strategic Goals...");
+                    foreach (int fid in fids) ai.UpdateMonthlyGoal(conn, fid);
+                }
 
-		_currentTurnIndex = -1;
-		AdvanceTurn();
-	}
+                GD.Print("[TurnManager] NEW WEEK! Refreshing Weekly Tasks & Repositioning...");
+                foreach (int fid in fids)
+                {
+                    ai.UpdateWeeklyTask(conn, fid);
+                    ai.RepositionOfficers(conn, fid);
+                }
+            }
+        }
 
-	private void RollInitiative()
-	{
-		_turnQueue.Clear();
-		var factionScores = new Dictionary<int, float>();
-		var rng = new Random();
+        _currentTurnIndex = -1;
+        AdvanceTurn();
+    }
 
-		using (var conn = DatabaseHelper.GetConnection())
-		{
-			conn.Open();
-			var cmd = conn.CreateCommand();
-			// Get Faction Leaders and their stats
+    private void RollInitiative()
+    {
+        _turnQueue.Clear();
+        var factionScores = new Dictionary<int, float>();
+        var rng = new Random();
+
+        using (var conn = DatabaseHelper.GetConnection())
+        {
+            conn.Open();
+            var cmd = conn.CreateCommand();
+            // Get Faction Leaders and their stats
 			// Assuming Highest Rank or specific 'is_commander' flag. 
 			// For now, let's grab the officer with MAX(strategy) in the faction as the "Brain"
 			cmd.CommandText = @"
@@ -124,8 +133,17 @@ public partial class TurnManager : Node
 			}
 		}
 
-		// Sort by score descending
-		_turnQueue = factionScores.OrderByDescending(x => x.Value).Select(x => x.Key).ToList();
+		// Sort AI factions by score descending, then add Player (-1) at the VERY END
+		_turnQueue = factionScores
+			.Where(x => x.Key != -1)
+			.OrderByDescending(x => x.Value)
+			.Select(x => x.Key)
+			.ToList();
+
+		if (factionScores.ContainsKey(-1))
+		{
+			_turnQueue.Add(-1);
+		}
 
 		GD.Print($"Initiative Rolled for Week! Order: {string.Join(", ", _turnQueue)}");
 	}
@@ -278,9 +296,11 @@ public partial class TurnManager : Node
 						ExecuteSql(conn, $"UPDATE cities SET decay_turns = {newDecay} WHERE city_id = {c.id}");
 						GD.Print($"[Decay] {c.name} is empty! Decay: {newDecay}/3");
 					}
+					ActionManager.Instance.EmitSignal(ActionManager.SignalName.MapStateChanged);
 				}
 			}
 		}
+
 	}
 
 	// Conflict Resolution
@@ -392,17 +412,19 @@ public partial class TurnManager : Node
 			cmd.CommandText = "DELETE FROM pending_battles WHERE location_id = $id";
 			cmd.Parameters.AddWithValue("$id", cityId);
 			cmd.ExecuteNonQuery();
+			ActionManager.Instance.EmitSignal(ActionManager.SignalName.MapStateChanged);
 		}
 	}
+
 
 	private void EndDayCycle()
 	{
 		ProcessCityDecay();
 
 		int currentDay = GetCurrentDay();
-		if (currentDay % 28 == 0)
+		if (currentDay % 7 == 0)
 		{
-			ProcessMonthlyHarvest();
+			ProcessWeeklyHarvest();
 		}
 
 		// Ronin Agency: Independent officers can join factions if they like them
@@ -414,9 +436,9 @@ public partial class TurnManager : Node
 		StartNewDay();
 	}
 
-	private void ProcessMonthlyHarvest()
+	private void ProcessWeeklyHarvest()
 	{
-		GD.Print("[TurnManager] Processing Monthly Harvest (Tax & Agri)...");
+		GD.Print("[TurnManager] Processing Weekly Harvest (Tax & Agri)...");
 		using (var conn = DatabaseHelper.GetConnection())
 		{
 			conn.Open();
@@ -450,23 +472,6 @@ public partial class TurnManager : Node
 				ExecuteSql(conn, $"UPDATE factions SET gold = gold + {u.gold}, supplies = supplies + {u.food} WHERE faction_id = {u.fid}");
 				GD.Print($"[Harvest] Faction {u.fid} collected {u.gold} Gold and {u.food} Supplies.");
 			}
-		}
-	}
-
-	private void RefreshAllFactionGoals(SqliteConnection conn, FactionAI ai, bool monthly)
-	{
-		var cmd = conn.CreateCommand();
-		cmd.CommandText = "SELECT faction_id FROM factions";
-		var fids = new List<int>();
-		using (var r = cmd.ExecuteReader())
-		{
-			while (r.Read()) fids.Add(r.GetInt32(0));
-		}
-
-		foreach (var fid in fids)
-		{
-			if (monthly) ai.UpdateMonthlyGoal(conn, fid);
-			ai.UpdateWeeklyTask(conn, fid);
 		}
 	}
 

@@ -114,30 +114,58 @@ public partial class CharacterCreation : Control
 			connection.Open();
 
 			// 2. Insert new Player (Clean old player if any, WorldGen wipes is_player=0 only)
-			var cleanCmd = connection.CreateCommand();
-			cleanCmd.CommandText = @"
-				DELETE FROM game_state;
-				DELETE FROM officers WHERE is_player = 1;
-			";
-			cleanCmd.ExecuteNonQuery();
+			using (var trans = connection.BeginTransaction())
+			{
+				try
+				{
+					var cleanCmd = connection.CreateCommand();
+					cleanCmd.CommandText = @"
+						DELETE FROM game_state;
+						DELETE FROM officers WHERE is_player = 1;
+					";
+					cleanCmd.ExecuteNonQuery();
 
-			// 3. Insert Player
-			var command = connection.CreateCommand();
-			command.CommandText =
-            @"
-                INSERT INTO officers (name, leadership, intelligence, strength, politics, charisma, faction_id, location_id, is_player, rank, reputation, current_action_points, max_action_points, troops, max_troops)
-                VALUES ($name, $lea, $int, $str, $pol, $cha, NULL, 1, 1, 'Volunteer', 0, 3, 3, 100, 100);
-                
-                INSERT INTO game_state (current_day, player_id) VALUES (1, last_insert_rowid());
-			";
-			command.Parameters.AddWithValue("$name", name);
-			command.Parameters.AddWithValue("$lea", (int)LeadershipSpinBox.Value);
-			command.Parameters.AddWithValue("$int", (int)IntelligenceSpinBox.Value);
-			command.Parameters.AddWithValue("$str", (int)StrengthSpinBox.Value);
-			command.Parameters.AddWithValue("$pol", (int)PoliticsSpinBox.Value);
-			command.Parameters.AddWithValue("$cha", (int)CharismaSpinBox.Value);
+					// 3. Insert Player with full stat row
+					int lea = (int)LeadershipSpinBox.Value;
+					int intl = (int)IntelligenceSpinBox.Value;
+					int str = (int)StrengthSpinBox.Value;
+					int pol = (int)PoliticsSpinBox.Value;
+					int cha = (int)CharismaSpinBox.Value;
 
-			command.ExecuteNonQuery();
+					var command = connection.CreateCommand();
+					command.CommandText = @"
+						INSERT INTO officers (
+							name, leadership, intelligence, strength, politics, charisma, 
+							faction_id, location_id, is_player, is_commander, rank, reputation, 
+							current_action_points, max_action_points, troops, max_troops, gold,
+							stat_points, base_leadership, base_intelligence, base_strength, base_politics, base_charisma
+						)
+						VALUES (
+							$name, $lea, $int, $str, $pol, $cha, 
+							NULL, 1, 1, 0, 'Volunteer', 0, 
+							3, 3, 100, 100, 200,
+							0, $lea, $int, $str, $pol, $cha
+						);
+						
+						INSERT INTO game_state (current_day, player_id) VALUES (1, last_insert_rowid());
+					";
+					command.Parameters.AddWithValue("$name", name);
+					command.Parameters.AddWithValue("$lea", lea);
+					command.Parameters.AddWithValue("$int", intl);
+					command.Parameters.AddWithValue("$str", str);
+					command.Parameters.AddWithValue("$pol", pol);
+					command.Parameters.AddWithValue("$cha", cha);
+
+					command.ExecuteNonQuery();
+					trans.Commit();
+				}
+				catch (Exception ex)
+				{
+					trans.Rollback();
+					GD.PrintErr($"[CharacterCreation] Failed to save player: {ex.Message}");
+					throw;
+				}
+			}
 
 			// Re-initialize Diplomacy (Since we wiped it)
 			// We use CallDeferred to ensure safe execution or just direct call if Autoload is ready

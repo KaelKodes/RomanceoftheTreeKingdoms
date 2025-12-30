@@ -8,9 +8,14 @@ public partial class OfficerCard : Window
 	private int _playerId;
 
 	// UI Refs
+	private Label _titleLabel;
 	private Label _nameLabel;
-	private Label _statsLabel;
+	private Label _rankLabel;
+	private Label _factionLabel;
+	private Label _reputationLabel;
+	private Label _winsLabel;
 	private Label _relLabel;
+	private Label _statsLabel;
 	private VBoxContainer _actionContainer;
 	private TextureRect _portrait;
 
@@ -19,7 +24,12 @@ public partial class OfficerCard : Window
 		// Wire up UI
 		var root = GetNode("Panel/MarginContainer/VBoxContainer");
 		_portrait = root.GetNode<TextureRect>("Portrait");
+		_titleLabel = root.GetNode<Label>("Title1Label");
 		_nameLabel = root.GetNode<Label>("NameLabel");
+		_rankLabel = root.GetNode<Label>("RankLabel");
+		_factionLabel = root.GetNode<Label>("FactionLabel");
+		_reputationLabel = root.GetNode<Label>("ReputationLabel");
+		_winsLabel = root.GetNode<Label>("WinsLabel");
 		_relLabel = root.GetNode<Label>("RelationLabel");
 		_statsLabel = root.GetNode<Label>("StatsLabel");
 		_actionContainer = root.GetNode<VBoxContainer>("ActionContainer");
@@ -52,7 +62,8 @@ public partial class OfficerCard : Window
 			var cmd = conn.CreateCommand();
 			cmd.CommandText = @"
                 SELECT o.name, f.name, o.leadership, o.intelligence, o.strength, o.politics, f.leader_id, o.faction_id, o.rank, o.reputation, o.battles_won, o.charisma, 
-                       (SELECT COUNT(*) FROM cities WHERE governor_id = o.officer_id AND city_id = o.location_id) as is_local_gov
+                       (SELECT COUNT(*) FROM cities WHERE governor_id = o.officer_id AND city_id = o.location_id) as is_local_gov,
+                       o.portrait_source_id, o.portrait_coords
                 FROM officers o
                 LEFT JOIN factions f ON o.faction_id = f.faction_id
 				WHERE o.officer_id = $oid";
@@ -76,14 +87,51 @@ public partial class OfficerCard : Window
 					int wins = r.IsDBNull(10) ? 0 : r.GetInt32(10);
 					int cha = r.IsDBNull(11) ? 50 : r.GetInt32(11);
 					bool isGov = r.GetInt32(12) > 0;
+					int pSrc = r.IsDBNull(13) ? 0 : r.GetInt32(13);
+					string pCoords = r.IsDBNull(14) ? "0,0" : r.GetString(14);
 
-					// Build Title String
+					// Load Portrait
+					// Load Atlas
+					var atlas = GD.Load<TileSet>("res://assets/Portraits/CustomOfficers.tres");
+					if (atlas != null)
+					{
+						// Parse coords
+						var parts = pCoords.Split(',');
+						int x = int.Parse(parts[0]);
+						int y = int.Parse(parts[1]);
+						var region = atlas.GetSource(pSrc) as TileSetAtlasSource;
+						if (region != null)
+						{
+							// Create AtlasTexture
+							var tex = new AtlasTexture();
+							tex.Atlas = region.Texture;
+							tex.Region = region.GetTileTextureRegion(new Vector2I(x, y));
+							_portrait.Texture = tex;
+							_portrait.ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize; // Use actual size? Or Keep Aspect Centered
+							_portrait.StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered;
+						}
+					}
+
+					// Build Title
 					var titles = new System.Collections.Generic.List<string>();
 					if (isLeader) titles.Add("Faction Leader");
 					if (isGov) titles.Add("Governor");
-					string titleStr = titles.Count > 0 ? string.Join(", ", titles) : "Officer";
 
-					_nameLabel.Text = $"{name}\n{faction}\nRank: {rank} | {titleStr}\nReputation: {rep} | Wins: {wins}";
+					if (titles.Count > 0)
+					{
+						_titleLabel.Text = string.Join(", ", titles);
+						_titleLabel.Visible = true;
+					}
+					else
+					{
+						_titleLabel.Visible = false;
+					}
+
+					_nameLabel.Text = name;
+					_rankLabel.Text = $"Rank: {rank}";
+					_factionLabel.Text = faction;
+					_reputationLabel.Text = $"Reputation: {rep}";
+					_winsLabel.Text = $"Wins: {wins}";
 
 					// Get Relation
 					int rel = GetRelationship(_playerId, _officerId);
@@ -104,13 +152,13 @@ public partial class OfficerCard : Window
 						_statsLabel.Text = "Stats: ??? (Get closer to reveal)";
 					}
 
-					SetupActions(rel, isLeader, factionId);
+					SetupActions(rel, isLeader, factionId, isGov);
 				}
 			}
 		}
 	}
 
-	private void SetupActions(int rel, bool isTargetLeader, int targetFactionId)
+	private void SetupActions(int rel, bool isTargetLeader, int targetFactionId, bool isTargetGovernor)
 	{
 		// Clear
 		foreach (Node c in _actionContainer.GetChildren()) c.QueueFree();
@@ -139,7 +187,7 @@ public partial class OfficerCard : Window
 			// They are in a faction.
 			// If they are Leader, and Rel > 50 -> "Request to Join" (if player is Free?)
 			// We need to know if Player is Free.
-			if (isTargetLeader && rel >= 50)
+			if ((isTargetLeader || isTargetGovernor) && rel >= 50)
 			{
 				AddButton("Request to Join Faction (1 AP)", () => OnJoinPressed());
 			}

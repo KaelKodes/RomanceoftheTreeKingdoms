@@ -1,13 +1,24 @@
-[gd_scene load_steps=2 format=3 uid="uid://cegg47gwprlmd"]
+[gd_scene load_steps=5 format=3 uid="uid://cegg47gwprlmd"]
 
 [ext_resource type="Script" uid="uid://c1w64mfyrgylq" path="res://scripts/ui/OfficerCard.cs" id="1_script"]
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_3aog5"]
+
+[sub_resource type="Theme" id="Theme_ct2ut"]
+TextEdit/styles/normal = SubResource("StyleBoxFlat_3aog5")
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ikpn1"]
+bg_color = Color(0.18039216, 0.18039216, 0.18039216, 0.84313726)
+
 [node name="OfficerCard" type="Window"]
+transparent_bg = true
 oversampling_override = 1.0
-initial_position = 2
-size = Vector2i(400, 500)
-visible = false
-exclusive = true
+initial_position = 1
+size = Vector2i(290, 476)
+wrap_controls = true
+transparent = true
+min_size = Vector2i(150, 400)
+theme = SubResource("Theme_ct2ut")
 script = ExtResource("1_script")
 
 [node name="Panel" type="Panel" parent="."]
@@ -16,11 +27,14 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_ikpn1")
 
 [node name="MarginContainer" type="MarginContainer" parent="Panel"]
 layout_mode = 0
 anchor_right = 1.0
 anchor_bottom = 1.0
+offset_right = -10.0
+offset_bottom = -57.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_constants/margin_left = 20
@@ -30,17 +44,46 @@ theme_override_constants/margin_bottom = 20
 
 [node name="VBoxContainer" type="VBoxContainer" parent="Panel/MarginContainer"]
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 0
+alignment = 1
 
 [node name="Portrait" type="TextureRect" parent="Panel/MarginContainer/VBoxContainer"]
 custom_minimum_size = Vector2(100, 100)
 layout_mode = 2
+size_flags_vertical = 2
 stretch_mode = 5
+
+[node name="Title1Label" type="Label" parent="Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "Title"
+horizontal_alignment = 1
+vertical_alignment = 2
 
 [node name="NameLabel" type="Label" parent="Panel/MarginContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 24
 text = "Name"
+horizontal_alignment = 1
+
+[node name="RankLabel" type="Label" parent="Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Rank"
+horizontal_alignment = 1
+
+[node name="FactionLabel" type="Label" parent="Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Faction"
+horizontal_alignment = 1
+
+[node name="ReputationLabel" type="Label" parent="Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Reputation"
+horizontal_alignment = 1
+
+[node name="WinsLabel" type="Label" parent="Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Wins"
 horizontal_alignment = 1
 
 [node name="RelationLabel" type="Label" parent="Panel/MarginContainer/VBoxContainer"]

@@ -72,7 +72,7 @@ offset_top = -23.0
 offset_right = 49.5
 grow_horizontal = 2
 grow_vertical = 0
-text = "Version 0.0.2"
+text = "Version 0.0.4"
 
 [connection signal="pressed" from="CanvasLayer/MarginContainer/HBoxContainer/NewButton" to="." method="OnNewGamePressed"]
 [connection signal="pressed" from="CanvasLayer/MarginContainer/HBoxContainer/QuitButton" to="." method="OnQuitPressed"]

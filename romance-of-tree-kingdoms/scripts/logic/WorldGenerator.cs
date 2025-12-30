@@ -18,9 +18,70 @@ public partial class WorldGenerator : Node
     private string[] _factionNames = new string[] { "Crimson Empire", "Azure Alliance", "Emerald Coalition" };
     private string[] _factionColors = new string[] { "#FF4444", "#4444FF", "#44FF44" };
 
+    private Dictionary<string, (int Source, string Coords)> _fixedPortraits = new Dictionary<string, (int, string)>()
+    {
+		// Shu (Source 5)
+		{ "Liu Bei", (5, "0,0") }, { "Guan Yu", (5, "1,0") }, { "Zhang Fei", (5, "2,0") },
+        { "Zhuge Liang", (5, "3,0") }, { "Zhao Yun", (5, "0,1") }, { "Huang Zhong", (5, "1,1") },
+
+		// Wei (Source 6)
+		{ "Cao Cao", (6, "0,0") }, { "Guo Jia", (6, "1,0") }, { "Zhang Liao", (6, "2,0") },
+        { "Xiahou Yuan", (6, "3,0") }, { "Sima Yi", (6, "0,1") }, { "Xu Huang", (6, "1,1") },
+
+		// Other1 (Source 3)
+		{ "Xu Shu", (3, "0,0") }, { "Lu Bu", (3, "1,0") }, { "Diaochan", (3, "2,0") },
+        { "Chen Gong", (3, "3,0") }, { "Yuan Shao", (3, "0,1") }, { "Ma Chao", (3, "1,1") },
+        { "Hu Ji", (3, "0,2") },
+
+		// Other2 (Source 4) - Unique Sizes
+		{ "Fisherman", (4, "2,1") }, { "Lin Zhi", (4, "3,1") },
+
+		// Custom (Source 0)
+		{ "Han De", (0, "2,2") }
+    };
+
+    private List<(int Source, string Coords)> _genericPool = new List<(int, string)>();
+
     public override void _Ready()
     {
-        // _dbPath = System.IO.Path.Combine(ProjectSettings.GlobalizePath("res://"), "../tree_kingdoms.db");
+        // Pre-populate generic pool
+        AddGeneric(0, 3, 3, new List<string> { "0,0", "2,2" }); // Skip Player (0,0) and Han De (2,2)
+        AddGeneric(1, 2, 3);
+        AddGeneric(7, 2, 4); // Wu
+
+        // Shuffle the pool
+        var rng = new Random();
+        _genericPool = _genericPool.OrderBy(x => rng.Next()).ToList();
+    }
+
+    private void AddGeneric(int source, int rows, int cols, List<string> exclude = null)
+    {
+        for (int y = 0; y < rows; y++)
+        {
+            for (int x = 0; x < cols; x++)
+            {
+                string c = $"{x},{y}";
+                if (exclude != null && exclude.Contains(c)) continue;
+                _genericPool.Add((source, c));
+            }
+        }
+    }
+
+    private (int Source, string Coords) GetPortraitFor(string name, bool isPlayer)
+    {
+        if (isPlayer) return (0, "0,0"); // Lock Player to Custom 0,0
+
+        if (_fixedPortraits.ContainsKey(name)) return _fixedPortraits[name];
+
+        // Assign from generic pool
+        if (_genericPool.Count > 0)
+        {
+            var p = _genericPool[0];
+            _genericPool.RemoveAt(0);
+            return p;
+        }
+
+        return (0, "0,0"); // Fallback
     }
 
     public void GenerateNewWorld()
@@ -70,25 +131,33 @@ public partial class WorldGenerator : Node
 
                     foreach (var name in shuffledNames)
                     {
+                        var (src, coords) = GetPortraitFor(name, false);
+
                         var cmd = conn.CreateCommand();
                         cmd.CommandText = @"
-                            INSERT INTO officers (name, leadership, intelligence, strength, politics, charisma, is_player, rank, reputation, troops, is_commander, max_troops, max_action_points, current_action_points) 
-                            VALUES ($name, $lea, $int, $str, $pol, $cha, 0, $rnk, 0, $tr, 0, $mt, 3, 3);
+                            INSERT INTO officers (name, leadership, intelligence, strength, politics, charisma, is_player, rank, reputation, troops, is_commander, max_troops, max_action_points, current_action_points, base_leadership, base_intelligence, base_strength, base_politics, base_charisma, portrait_source_id, portrait_coords) 
+                            VALUES ($name, $lea, $int, $str, $pol, $cha, 0, $rnk, 0, $tr, 0, $mt, 3, 3, $lea, $int, $str, $pol, $cha, $psrc, $pcoords);
                             SELECT last_insert_rowid();";
 
                         cmd.Parameters.AddWithValue("$name", name);
                         cmd.Parameters.AddWithValue("$rnk", GameConstants.RANK_VOLUNTEER);
                         cmd.Parameters.AddWithValue("$tr", GameConstants.TROOPS_VOLUNTEER);
                         cmd.Parameters.AddWithValue("$mt", GameConstants.TROOPS_VOLUNTEER);
-                        cmd.Parameters.AddWithValue("$lea", rng.Next(20, 75)); // Lower base, room for growth
+                        cmd.Parameters.AddWithValue("$lea", rng.Next(20, 75));
                         cmd.Parameters.AddWithValue("$int", rng.Next(20, 75));
                         cmd.Parameters.AddWithValue("$str", rng.Next(20, 75));
                         cmd.Parameters.AddWithValue("$pol", rng.Next(20, 75));
-                        cmd.Parameters.AddWithValue("$cha", rng.Next(30, 80)); // Charisma slightly buffered
+                        cmd.Parameters.AddWithValue("$cha", rng.Next(30, 80));
+                        cmd.Parameters.AddWithValue("$psrc", src);
+                        cmd.Parameters.AddWithValue("$pcoords", coords);
 
                         long oid = (long)cmd.ExecuteScalar();
                         officerIds.Add(oid);
                     }
+
+                    // Update Player Portrait
+                    var (pSrc, pCoords) = GetPortraitFor("Player", true); // Name ignored
+                    ExecuteSql(conn, $"UPDATE officers SET portrait_source_id = {pSrc}, portrait_coords = '{pCoords}' WHERE is_player = 1");
 
                     // 4. Assign Leaders
                     // Pick 3 random officers to be leaders

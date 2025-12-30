@@ -92,6 +92,14 @@ class Officer(Base):
     current_assignment = Column(String)
     assignment_target_id = Column(Integer)
     
+    # Stat Allocation
+    stat_points = Column(Integer, default=0)
+    base_strength = Column(Integer, default=50)
+    base_leadership = Column(Integer, default=50)
+    base_intelligence = Column(Integer, default=50)
+    base_politics = Column(Integer, default=50)
+    base_charisma = Column(Integer, default=50)
+    
     # Relationships
     faction = relationship("Faction", back_populates="officers")
     current_city = relationship("City", back_populates="officers", foreign_keys=[location_id])
@@ -202,3 +210,12 @@ class FactionRelation(Base):
     # Relationships (Optional, for navigation if needed)
     source_faction = relationship("Faction", foreign_keys=[source_faction_id])
     target_faction = relationship("Faction", foreign_keys=[target_faction_id])
+
+class PendingBattle(Base):
+    __tablename__ = 'pending_battles'
+    
+    battle_id = Column(Integer, primary_key=True)
+    location_id = Column(Integer, ForeignKey('cities.city_id'), nullable=False)
+    attacker_faction_id = Column(Integer, ForeignKey('factions.faction_id'), nullable=False)
+    source_location_id = Column(Integer, ForeignKey('cities.city_id'), nullable=True)
+    leader_id = Column(Integer, ForeignKey('officers.officer_id'), nullable=True)

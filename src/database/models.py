@@ -27,8 +27,9 @@ class Faction(Base):
     goal_target_id = Column(Integer) # City or Officer ID target
 
     # Resources
-    gold = Column(Integer, default=1000)
+    gold_treasury = Column(Integer, default=5000)
     supplies = Column(Integer, default=10000)
+    tax_rate = Column(Float, default=0.1)
     
     # Relationships
     officers = relationship("Officer", back_populates="faction")
@@ -71,6 +72,7 @@ class Officer(Base):
     destination_city_id = Column(Integer, ForeignKey('cities.city_id'), nullable=True) # For multi-day travel
     
     # Attributes
+    gold = Column(Integer, default=200)
     leadership = Column(Integer, default=50)
     intelligence = Column(Integer, default=50)
     strength = Column(Integer, default=50)
@@ -98,7 +100,11 @@ class Officer(Base):
     base_leadership = Column(Integer, default=50)
     base_intelligence = Column(Integer, default=50)
     base_politics = Column(Integer, default=50)
+    base_politics = Column(Integer, default=50)
     base_charisma = Column(Integer, default=50)
+
+    # Combat Config
+    formation_type = Column(Integer, default=0) # FormationShape enum
     
     # Relationships
     faction = relationship("Faction", back_populates="officers")

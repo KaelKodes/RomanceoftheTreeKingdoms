@@ -16,6 +16,10 @@ public partial class OfficerCard : Window
 	private Label _winsLabel;
 	private Label _relLabel;
 	private Label _statsLabel;
+	private Label _skillsLabel;
+	private Label _formationLabel;
+	private Label _troopLabel;
+	private Label _battleLabel;
 	private VBoxContainer _actionContainer;
 	private TextureRect _portrait;
 
@@ -32,6 +36,10 @@ public partial class OfficerCard : Window
 		_winsLabel = root.GetNode<Label>("WinsLabel");
 		_relLabel = root.GetNode<Label>("RelationLabel");
 		_statsLabel = root.GetNode<Label>("StatsLabel");
+		_skillsLabel = root.GetNode<Label>("SkillsLabel");
+		_formationLabel = root.GetNode<Label>("FormationLabel");
+		_troopLabel = root.GetNode<Label>("TroopLabel");
+		_battleLabel = root.GetNode<Label>("BattleLabel");
 		_actionContainer = root.GetNode<VBoxContainer>("ActionContainer");
 
 		// Window Events
@@ -63,7 +71,8 @@ public partial class OfficerCard : Window
 			cmd.CommandText = @"
                 SELECT o.name, f.name, o.leadership, o.intelligence, o.strength, o.politics, f.leader_id, o.faction_id, o.rank, o.reputation, o.battles_won, o.charisma, 
                        (SELECT COUNT(*) FROM cities WHERE governor_id = o.officer_id AND city_id = o.location_id) as is_local_gov,
-                        o.portrait_source_id, o.portrait_coords, o.formation_type, o.location_id, o.main_troop_type, o.officer_type
+                        o.portrait_source_id, o.portrait_coords, o.formation_type, o.location_id, o.main_troop_type, o.officer_type,
+                        o.farming, o.business, o.inventing, o.fortification, o.security
                 FROM officers o
                 LEFT JOIN factions f ON o.faction_id = f.faction_id
 				WHERE o.officer_id = $oid";
@@ -171,16 +180,49 @@ public partial class OfficerCard : Window
 					if (rel >= 10 || _officerId == _playerId) // Always know self
 					{
 						_statsLabel.Text = $"Leadership: {ldr}\nInt: {intl} | Str: {str}\nPol: {pol} | Cha: {cha}";
+
+						// Populate Skills
+						int farm = r.GetInt32(19);
+						int biz = r.GetInt32(20);
+						int inv = r.GetInt32(21);
+						int fort = r.GetInt32(22);
+						int sec = r.GetInt32(23);
+						_skillsLabel.Text = $"Farming: {farm} | Business: {biz}\nTech: {inv} | Fort: {fort} | Sec: {sec}";
+						_skillsLabel.Visible = true;
+						_skillsLabel.Modulate = Colors.Green;
+
+						// Populate New Skill Elements
+						TroopType tt = (mtt > 0) ? (TroopType)(mtt - 1) : TroopType.Infantry;
+						TroopType ot = (oct > 0) ? (TroopType)(oct - 1) : TroopType.Infantry;
+						FormationShape fs = (FormationShape)fType;
+
+						_formationLabel.Text = $"Formation: {fs}";
+						_troopLabel.Text = $"Troop: {tt}";
+						_battleLabel.Text = $"Battle: {ot}";
+
+						// Hide labels if player (they have buttons)
+						bool isSelf = (_officerId == _playerId);
+						_formationLabel.Visible = !isSelf;
+						_troopLabel.Visible = !isSelf;
+						_battleLabel.Visible = !isSelf;
+
+						// Optional Color coding
+						_formationLabel.Modulate = new Color(0.7f, 0.8f, 1.0f); // Soft blue
+						_troopLabel.Modulate = new Color(1.0f, 0.8f, 0.6f);     // Soft orange
+						_battleLabel.Modulate = new Color(1.0f, 0.7f, 0.7f);    // Soft red
+
 						if (_officerId != _playerId)
 						{
-							TroopType tt = (mtt > 0) ? (TroopType)(mtt - 1) : TroopType.Infantry;
-							TroopType ot = (oct > 0) ? (TroopType)(oct - 1) : TroopType.Infantry;
-							_statsLabel.Text += $"\nFormation: {(FormationShape)fType}\nTroop: {tt} | Battle: {ot}";
+							// No longer needed in stats label text
 						}
 					}
 					else
 					{
 						_statsLabel.Text = "Stats: ??? (Get closer to reveal)";
+						_skillsLabel.Visible = false;
+						_formationLabel.Visible = false;
+						_troopLabel.Visible = false;
+						_battleLabel.Visible = false;
 					}
 
 					SetupActions(rel, isLeader, factionId, isGov, fType, isLocal, mtt, oct);
@@ -293,16 +335,18 @@ public partial class OfficerCard : Window
 	private void OnTroopCycle(int currentIdx)
 	{
 		// currentIdx is 0 (auto) or 1-5 (enum values 0-4 + 1)
+		// Restrict Player to first 3 types: Infantry, Archer, Cavalry
 		int currentType = (currentIdx == 0) ? -1 : (currentIdx - 1);
-		int nextType = (currentType + 1) % 5;
+		int nextType = (currentType + 1) % 3;
 		UpdateOfficerTypeStat("main_troop_type", nextType + 1);
 		Refresh();
 	}
 
 	private void OnBattleTypeCycle(int currentIdx)
 	{
+		// Restrict Player to first 3 types: Infantry, Archer, Cavalry
 		int currentType = (currentIdx == 0) ? -1 : (currentIdx - 1);
-		int nextType = (currentType + 1) % 5;
+		int nextType = (currentType + 1) % 3;
 		UpdateOfficerTypeStat("officer_type", nextType + 1);
 		Refresh();
 	}

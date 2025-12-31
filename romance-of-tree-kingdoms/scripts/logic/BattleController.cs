@@ -24,6 +24,9 @@ public partial class BattleController : Node2D
 	private bool _isPaused = false;
 	private bool _battleEnded = false;
 	private double _aiTimer = 0;
+	private double _gaugeTimer = 0; // Throttle UI updates
+
+	private BattleGauge _battleGauge;
 
 	public override void _Ready()
 	{
@@ -31,6 +34,7 @@ public partial class BattleController : Node2D
 		_battleManager = GetNodeOrNull<BattleManager>("/root/BattleManager");
 		_grid = GetNodeOrNull<BattleGrid>("BattleGrid");
 		_unitScene = GD.Load<PackedScene>("res://scenes/Unit.tscn");
+		_battleGauge = GetNodeOrNull<BattleGauge>("%BattleGauge");
 
 		if (_battleManager == null || _grid == null || _unitScene == null)
 		{
@@ -38,14 +42,11 @@ public partial class BattleController : Node2D
 			return;
 		}
 
-		// Initialize HUD
-		var hud = new BattleHUD();
-		AddChild(hud);
-		hud.Init(this);
-
 		// Initialize Environment Layer
 		var pm = new ProjectileManager();
 		AddChild(pm);
+
+		SetupControlToggles();
 
 		StartBattle();
 	}
@@ -74,7 +75,32 @@ public partial class BattleController : Node2D
 			_aiTimer = 0;
 		}
 
+		// Gauge Update (Every 0.25s)
+		_gaugeTimer += dt;
+		if (_gaugeTimer >= 0.25f)
+		{
+			UpdateGauge();
+			_gaugeTimer = 0;
+		}
+
 		CheckWinCondition();
+	}
+
+	private void UpdateGauge()
+	{
+		if (_battleGauge == null) return;
+
+		// Attackers
+		var attackers = _units.Where(u => !u.IsDefender && u.CurrentHP > 0).ToList();
+		int attTroops = attackers.Sum(u => u.CurrentHP);
+		float attMorale = attackers.Count > 0 ? (float)attackers.Average(u => u.CurrentMorale) : 0;
+
+		// Defenders
+		var defenders = _units.Where(u => u.IsDefender && u.CurrentHP > 0).ToList();
+		int defTroops = defenders.Sum(u => u.CurrentHP);
+		float defMorale = defenders.Count > 0 ? (float)defenders.Average(u => u.CurrentMorale) : 0;
+
+		_battleGauge.UpdateStats(attTroops, defTroops, attMorale, defMorale);
 	}
 
 	private void UpdateAITargets()
@@ -166,6 +192,38 @@ public partial class BattleController : Node2D
 		GD.Print($"Speed set to: {TimeScale}x");
 	}
 
+	private bool _controlOfficer = true;
+	private bool _controlTroops = true;
+	private Button _btnOfficer;
+	private Button _btnTroops;
+
+	private void SetupControlToggles()
+	{
+		_btnOfficer = GetNodeOrNull<Button>("%OfficerToggle");
+		_btnTroops = GetNodeOrNull<Button>("%TroopsToggle");
+
+		if (_btnOfficer != null) _btnOfficer.Pressed += () => SetControlMode(_btnOfficer.ButtonPressed, _controlTroops);
+		if (_btnTroops != null) _btnTroops.Pressed += () => SetControlMode(_controlOfficer, _btnTroops.ButtonPressed);
+	}
+
+	private void SetControlMode(bool officer, bool troops)
+	{
+		// Enforce at least one
+		if (!officer && !troops)
+		{
+			if (_controlOfficer) troops = true; // If we were officer, switch to troops
+			else officer = true; // Else switch to officer
+		}
+
+		_controlOfficer = officer;
+		_controlTroops = troops;
+
+		if (_btnOfficer != null) _btnOfficer.SetPressedNoSignal(_controlOfficer);
+		if (_btnTroops != null) _btnTroops.SetPressedNoSignal(_controlTroops);
+
+		GD.Print($"Control Mode: Officer={_controlOfficer}, Troops={_controlTroops}");
+	}
+
 	public override void _UnhandledInput(InputEvent @event)
 	{
 		if (@event is InputEventKey k && k.Pressed)
@@ -183,6 +241,10 @@ public partial class BattleController : Node2D
 			{
 				SetSpeed(Math.Max(0.1f, TimeScale - 0.5f));
 			}
+			// Control Shortcuts
+			else if (k.Keycode == Key.Key1) SetControlMode(!_controlOfficer, _controlTroops); // Toggle Officer
+			else if (k.Keycode == Key.Key2) SetControlMode(_controlOfficer, !_controlTroops); // Toggle Troops
+			else if (k.Keycode == Key.Key3) SetControlMode(true, true); // Both
 		}
 
 		if (@event is InputEventMouseButton mb && mb.Pressed)
@@ -202,12 +264,28 @@ public partial class BattleController : Node2D
 			}
 			else if (mb.ButtonIndex == MouseButton.Right)
 			{
-				// Order Player Unit (if selected or default?)
-				// User wants to order "Their Character".
+				// Order Player Units
 				if (_playerUnit != null)
 				{
-					GD.Print($"Order: Player -> {gridPos}");
-					_playerUnit.SetFocus(gridPos, _grid);
+					GD.Print($"Order issued to {gridPos} (Off:{_controlOfficer} Trp:{_controlTroops})");
+
+					// 1. Order Officer
+					if (_controlOfficer)
+					{
+						_playerUnit.SetFocus(gridPos, _grid);
+					}
+
+					// 2. Order Troops (Squads attached to Player)
+					if (_controlTroops)
+					{
+						foreach (var u in _units)
+						{
+							if (u.ParentOfficer == _playerUnit && u.Role == UnitController.UnitRole.Squad)
+							{
+								u.SetFocus(gridPos, _grid);
+							}
+						}
+					}
 
 					// Visual Feedback (e.g., spawn a flag)
 				}
@@ -306,10 +384,14 @@ public partial class BattleController : Node2D
 		var attHQ = cps.FirstOrDefault(c => c.Type == ControlPoint.CPType.HQ && c.OwnerFactionId == ctx.AttackerFactionId);
 
 		var rng = new Random();
+		var spawnedIds = new HashSet<int>();
 
 		// Spawn Defenders
 		foreach (var def in ctx.DefenderOfficers)
 		{
+			if (spawnedIds.Contains(def.OfficerId)) continue;
+			spawnedIds.Add(def.OfficerId);
+
 			Vector2I spawnPos = defHQ != null ? GetRandomSpawnPos(defHQ.GridPosition, rng) : new Vector2I(2, 5);
 			SpawnUnit(def, spawnPos, true, playerIsDefender);
 		}
@@ -317,6 +399,9 @@ public partial class BattleController : Node2D
 		// Spawn Attackers
 		foreach (var att in ctx.AttackerOfficers)
 		{
+			if (spawnedIds.Contains(att.OfficerId)) continue;
+			spawnedIds.Add(att.OfficerId);
+
 			Vector2I spawnPos = attHQ != null ? GetRandomSpawnPos(attHQ.GridPosition, rng) : new Vector2I(17, 5);
 			SpawnUnit(att, spawnPos, false, playerIsAttacker);
 		}

@@ -156,7 +156,7 @@ public partial class CityMenu : Control
         if (actionMgr == null)
         {
             GD.PrintErr("ActionManager Autoload not found! Cannot determine context.");
-            AddActionButton("Close", nameof(OnClosePressed));
+            AddActionButton("Close", OnClosePressed);
             return;
         }
 
@@ -181,20 +181,35 @@ public partial class CityMenu : Control
             }
             else
             {
-                AddActionButton("Develop Commerce (Pol)", nameof(OnCommercePressed));
-                AddActionButton("Cultivate Land (Pol)", nameof(OnAgriculturePressed));
-                AddActionButton("Bolster Defense (Lea)", nameof(OnDefensePressed));
-                AddActionButton("Patrol / Order (Str)", nameof(OnPublicOrderPressed));
-                AddActionButton("Research (Int)", nameof(OnTechnologyPressed));
+                bool isLeader = IsPlayerLeader(playerId);
+                bool isGovernor = IsPlayerGovernor(playerId, cityId);
+                string mission = GetPlayerMission(playerId);
+
+                if (isLeader || isGovernor)
+                {
+                    AddActionButton("--- STRATEGY COUNCIL ---", OnCouncilPressed);
+                }
+
+                if (!string.IsNullOrEmpty(mission))
+                {
+                    AddActionButton($"WORK: {mission} (1 AP)", OnWorkMissionPressed);
+                }
+
+                // Development / Domestic Actions (Available to Everyone)
+                AddActionButton("Develop Commerce (Pol)", OnCommercePressed);
+                AddActionButton("Cultivate Land (Pol)", OnAgriculturePressed);
+                AddActionButton("Bolster Defense (Lea)", OnDefensePressed);
+                AddActionButton("Patrol / Order (Str)", OnPublicOrderPressed);
+                AddActionButton("Research (Int)", OnTechnologyPressed);
 
                 // Wisdom / Personal Actions
                 AddActionButton("---------------", null); // Divider
-                AddActionButton("Rest (Heal Army)", nameof(OnRestPressed));
-                AddActionButton("Train Stats", nameof(OnTrainPressed));
+                AddActionButton("Rest (Heal Army)", OnRestPressed);
+                AddActionButton("Train Stats", OnTrainPressed);
 
                 if (playerFaction > 0)
                 {
-                    AddActionButton("Resign", nameof(OnResignPressed));
+                    AddActionButton("Resign", OnResignPressed);
                 }
                 else // Ronin
                 {
@@ -203,18 +218,12 @@ public partial class CityMenu : Control
                         int playerRankLevel = GetPlayerRankLevel(playerId);
                         if (playerRankLevel >= 3)
                         {
-                            AddActionButton("Rise Up (Found Faction)", nameof(OnRiseUpPressed));
-                        }
-                        else
-                        {
-                            // Optional: Show disabled or informative label? 
-                            // User: "should only display if you can do it" -> so we hide it if rank is too low.
-                            // But we could show a hint if nearby. For now, strict as requested.
+                            AddActionButton("Rise Up (Found Faction)", OnRiseUpPressed);
                         }
                     }
                 }
 
-                AddActionButton("Close", nameof(OnClosePressed));
+                AddActionButton("Close", OnClosePressed);
             }
         }
         else
@@ -229,14 +238,13 @@ public partial class CityMenu : Control
             {
                 if (IsAdjacent(currentPlayerLoc, cityId))
                 {
-                    AddActionButton("Declare Attack!", nameof(OnDeclareAttackPressed));
+                    AddActionButton("Declare Attack!", OnDeclareAttackPressed);
                 }
             }
 
-            AddActionButton("Travel Here (-1 AP)", nameof(OnTravelPressed));
+            AddActionButton("Travel Here (-1 AP)", OnTravelPressed);
 
-
-            AddActionButton("Close", nameof(OnClosePressed));
+            AddActionButton("Close", OnClosePressed);
         }
     }
 
@@ -305,11 +313,21 @@ public partial class CityMenu : Control
         RefreshData();
     }
 
-    private void AddActionButton(string text, string methodName)
+    private void AddActionButton(string text, Action action)
     {
         var btn = new Button();
         btn.Text = text;
-        btn.Pressed += () => Call(methodName);
+
+        if (action != null)
+        {
+            btn.Pressed += () => action();
+        }
+        else
+        {
+            btn.Disabled = true;
+            btn.FocusMode = FocusModeEnum.None;
+        }
+
         ActionList.AddChild(btn);
     }
 
@@ -408,12 +426,12 @@ public partial class CityMenu : Control
         // Clear actions and show train options
         foreach (Node child in ActionList.GetChildren()) child.QueueFree();
 
-        AddActionButton("Train Leadership", nameof(OnTrainLea));
-        AddActionButton("Train Intelligence", nameof(OnTrainInt));
-        AddActionButton("Train Strength", nameof(OnTrainStr));
-        AddActionButton("Train Politics", nameof(OnTrainPol));
-        AddActionButton("Train Charisma", nameof(OnTrainCha));
-        AddActionButton("Back", nameof(RefreshData));
+        AddActionButton("Train Leadership", OnTrainLea);
+        AddActionButton("Train Intelligence", OnTrainInt);
+        AddActionButton("Train Strength", OnTrainStr);
+        AddActionButton("Train Politics", OnTrainPol);
+        AddActionButton("Train Charisma", OnTrainCha);
+        AddActionButton("Back", RefreshData);
     }
 
     public void OnTrainLea() { DoTrain("Leadership"); }
@@ -474,7 +492,7 @@ public partial class CityMenu : Control
             }
         }
 
-        AddActionButton("Back", nameof(OnTrainPressed));
+        AddActionButton("Back", OnTrainPressed);
     }
 
     private void ExecuteTrain(int mentorId, string stat)
@@ -572,10 +590,78 @@ public partial class CityMenu : Control
 			var res = cmd.ExecuteScalar();
 			if (res != null)
 			{
-				return GameConstants.GetRankLevel((string)res);
+				return GameConstants.GetLevelByRankName((string)res);
 			}
 			return 0;
 		}
 	}
 
+	private bool IsPlayerLeader(int playerId)
+	{
+		using (var conn = DatabaseHelper.GetConnection())
+		{
+			conn.Open();
+			var cmd = conn.CreateCommand();
+			cmd.CommandText = "SELECT COUNT(*) FROM factions WHERE leader_id = $pid";
+			cmd.Parameters.AddWithValue("$pid", playerId);
+			return (long)cmd.ExecuteScalar() > 0;
+		}
+	}
+
+	private bool IsPlayerGovernor(int playerId, int cityId)
+	{
+		using (var conn = DatabaseHelper.GetConnection())
+		{
+			conn.Open();
+			var cmd = conn.CreateCommand();
+			cmd.CommandText = "SELECT COUNT(*) FROM cities WHERE governor_id = $pid AND city_id = $cid";
+			cmd.Parameters.AddWithValue("$pid", playerId);
+			cmd.Parameters.AddWithValue("$cid", cityId);
+			return (long)cmd.ExecuteScalar() > 0;
+		}
+	}
+
+	private string GetPlayerMission(int playerId)
+	{
+		using (var conn = DatabaseHelper.GetConnection())
+		{
+			conn.Open();
+			var cmd = conn.CreateCommand();
+			cmd.CommandText = "SELECT current_mission FROM officers WHERE officer_id = $pid";
+			cmd.Parameters.AddWithValue("$pid", playerId);
+			var res = cmd.ExecuteScalar();
+			return (res != null && res != DBNull.Value) ? res.ToString() : null;
+		}
+	}
+
+	private void OnCouncilPressed()
+	{
+		GD.Print("Opening Strategic Council...");
+		// TODO: Instantiate CouncilUI
+		Hide();
+	}
+
+	private void OnWorkMissionPressed()
+	{
+		int playerId = GetPlayerId();
+		int cityId = GetCityId(_cityName);
+		string mission = GetPlayerMission(playerId);
+
+		var actionMgr = GetNode<ActionManager>("/root/ActionManager");
+		actionMgr.PerformDomesticAction(playerId, cityId, MapMissionToType(mission));
+		SetupActions(CheckPendingBattle(cityId));
+	}
+
+	private ActionManager.DomesticType MapMissionToType(string mission)
+	{
+		switch (mission)
+		{
+			case "Commerce": return ActionManager.DomesticType.Commerce;
+			case "Farming": return ActionManager.DomesticType.Agriculture;
+			case "Science": return ActionManager.DomesticType.Technology;
+			case "Defense": return ActionManager.DomesticType.Defense;
+			case "Order": return ActionManager.DomesticType.PublicOrder;
+			default: return ActionManager.DomesticType.PublicOrder;
+		}
+	}
 }

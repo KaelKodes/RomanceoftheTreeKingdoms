@@ -347,6 +347,63 @@ public partial class DatabaseMigration
                 // Soft fail, maybe cities don't exist yet if this is a fresh fresh run (unlikely as cities created in step 4/5)
                 GD.PrintErr($"[Migration] Route update failed: {ex.Message}");
             }
+
+            // Migration 13: Grand Strategy Logistics
+            GD.Print("[Migration] Migration 13: Grand Strategy Logistics...");
+
+            // Faction Logistics
+            string[] factionCols = {
+                "gold_treasury INTEGER DEFAULT 5000",
+                "supplies INTEGER DEFAULT 10000",
+                "tax_rate FLOAT DEFAULT 0.1",
+                "tactician_id INTEGER DEFAULT 0"
+            };
+            foreach (var colDef in factionCols)
+            {
+                string colName = colDef.Split(' ')[0];
+                if (!ColumnExists(conn, "factions", colName))
+                {
+                    ExecuteSql(conn, $"ALTER TABLE factions ADD COLUMN {colDef}");
+                }
+            }
+
+            // Officer State
+            string[] officerMeetingCols = {
+                "satisfaction INTEGER DEFAULT 100",
+                "current_mission TEXT DEFAULT NULL",
+                "merit_score INTEGER DEFAULT 0"
+            };
+            foreach (var colDef in officerMeetingCols)
+            {
+                string colName = colDef.Split(' ')[0];
+                if (!ColumnExists(conn, "officers", colName))
+                {
+                    ExecuteSql(conn, $"ALTER TABLE officers ADD COLUMN {colDef}");
+                }
+            }
+
+            // City Demographics
+            if (!ColumnExists(conn, "cities", "draft_population"))
+            {
+                ExecuteSql(conn, "ALTER TABLE cities ADD COLUMN draft_population INTEGER DEFAULT 1000");
+            }
+
+            // Migration 14: Domestic Skills
+            string[] skillCols = {
+                "farming INTEGER DEFAULT 0",
+                "business INTEGER DEFAULT 0",
+                "inventing INTEGER DEFAULT 0",
+                "fortification INTEGER DEFAULT 0",
+                "security INTEGER DEFAULT 0"
+            };
+            foreach (var colDef in skillCols)
+            {
+                string colName = colDef.Split(' ')[0];
+                if (!ColumnExists(conn, "officers", colName))
+                {
+                    ExecuteSql(conn, $"ALTER TABLE officers ADD COLUMN {colDef}");
+                }
+            }
         }
     }
 

@@ -359,22 +359,10 @@ public partial class BattleManager : Node
 
 	public int GetMaxTroops(string rank)
 	{
-		return GameConstants.GetMaxTroops(rank);
+		return GameConstants.GetMaxTroopsByLevel(GameConstants.GetLevelByRankName(rank));
 	}
 
-	public int GetRankLevel(string rank)
-	{
-		switch (rank)
-		{
-			case "Sovereign": return 5;
-			case "Commander": return 4;
-			case "General": return 3;
-			case "Lieutenant": return 2;
-			case "Regular": return 1;
-			case "Volunteer": return 0;
-			default: return 0;
-		}
-	}
+	public int GetRankLevel(string rank) => GameConstants.GetLevelByRankName(rank);
 
 	private void DetermineSides()
 	{
@@ -583,7 +571,8 @@ public partial class BattleManager : Node
 
 				foreach (var loser in realLosers)
 				{
-					if (loser.Rank == "Sovereign" || loser.Rank == "Commander" || loser.Rank == "General") defeatedCommander = true;
+					int loserLevel = GameConstants.GetLevelByRankName(loser.Rank);
+					if (loserLevel >= 8) defeatedCommander = true; // General or higher
 
 					// Track Loss
 					var loseCmd = conn.CreateCommand();
@@ -964,13 +953,13 @@ public partial class BattleManager : Node
 
 			if (isNewGovernor)
 			{
-				ExecuteSql(conn, $"UPDATE officers SET location_id = {targetCityId} WHERE officer_id = {winner.OfficerId}");
-				GD.Print($"{winner.Name} (New Governor) takes post at City {targetCityId}.");
+				ExecuteSql(conn, $"UPDATE officers SET location_id = {targetCityId}, current_assignment = NULL, assignment_target_id = 0 WHERE officer_id = {winner.OfficerId}");
+				GD.Print($"{winner.Name} (New Governor) takes post at City {targetCityId}. Assignment cleared.");
 			}
 			else if (isSourceGovernor)
 			{
-				ExecuteSql(conn, $"UPDATE officers SET location_id = {sourceCityId} WHERE officer_id = {winner.OfficerId}");
-				GD.Print($"{winner.Name} (Source Governor) returns to City {sourceCityId}.");
+				ExecuteSql(conn, $"UPDATE officers SET location_id = {sourceCityId}, current_assignment = NULL, assignment_target_id = 0 WHERE officer_id = {winner.OfficerId}");
+				GD.Print($"{winner.Name} (Source Governor) returns to City {sourceCityId}. Assignment cleared.");
 			}
 			else if (isFactionLeader)
 			{

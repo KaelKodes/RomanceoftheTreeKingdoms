@@ -37,44 +37,74 @@ public partial class WorldGenerator : Node
 		{ "Fisherman", (4, "2,1") }, { "Lin Zhi", (4, "3,1") },
 
 		// More1 (Source 2) - New Portraits
-		{ "Sun Quan", (2, "0,0") }, { "Pang Tong", (2, "1,0") }, { "Xun Yu", (2, "2,0") },
-        { "Wei Yan", (2, "0,1") }, { "Deng Ai", (2, "1,1") }, { "Sun Ce", (2, "2,1") },
-        { "Jiang Wei", (2, "0,2") }, { "Taishi Ci", (2, "1,2") }, { "Xiahou Dun", (2, "2,2") },
+		{ "Pang Tong", (2, "1,0") }, { "Xun Yu", (2, "2,0") },
+        { "Wei Yan", (2, "0,1") }, { "Deng Ai", (2, "1,1") },
+        { "Jiang Wei", (2, "0,2") }, { "Taishi Ci", (2, "1,2") },
 
 		// More2 (Source 8) - New Portraits
-		{ "Lu Meng", (8, "1,0") }, { "Dong Zhuo", (8, "2,0") },
+		{ "Xiahou Dun", (8, "0,0") }, { "Dong Zhuo", (8, "2,0") },
         { "Lu Su", (8, "3,0") },
 
 		// Custom (Source 0)
-		{ "Han De", (0, "2,2") },
+		{ "Han De", (0, "2,2") }, { "Zhong Hui", (0, "2,0") }, { "Dian Wei", (0, "1,0") },
 
 		// Wu (Source 7)
-		{ "Zhou Yu", (7, "3,0") }
+		{ "Zhou Yu", (7, "3,0") }, { "Sun Quan", (7, "2,0") }, { "Sun Ce", (7, "0,0") },
+        { "Sun Jian", (7, "0,0") }, { "Lu Meng", (7, "0,1") }, { "Lu Zun", (7, "1,1") }
     };
 
     private List<(int Source, string Coords)> _genericPool = new List<(int, string)>();
 
     public override void _Ready()
     {
-        // Pre-populate generic pool
-        AddGeneric(0, 3, 3, new List<string> { "0,0", "2,2" }); // Skip Player (0,0) and Han De (2,2)
-        AddGeneric(1, 2, 3);
-        AddGeneric(7, 2, 4); // Wu
+        // 1. Collect all fixed portraits to exclude them from the generic pool
+        var excludedTiles = new HashSet<string>();
+        foreach (var p in _fixedPortraits.Values)
+        {
+            excludedTiles.Add($"{p.Source}:{p.Coords}");
+        }
+
+        // Add specific manual exclusions
+        excludedTiles.Add("0:0,0"); // Player
+
+        // 2. Pre-populate generic pool based on actual atlas availability in CustomOfficers.tres
+        // Format: AddGeneric(sourceId, rows, cols, excludedList, globalExclusions)
+
+        // Custom (0): 4x4 but missing some? .tres has many tiles.
+        // Looking at .tres: 0:0, 1:0, 2:0, 3:0, 0:1, 1:1, 2:1, 3:1, 0:2, 1:2, 2:2, 3:2, 0:3, 1:3
+        AddGeneric(0, 4, 4, new List<string> { "2,3", "3,3" }, excludedTiles);
+
+        // Females (1): 4 cols, 3 rows (partial)
+        // 0:0-3:0, 0:1-3:1, 0:2-1:2
+        AddGeneric(1, 4, 3, new List<string> { "2,2", "3,2" }, excludedTiles);
+
+        // Wu (7): 4 cols, 2 rows (partial)
+        // 0:0-3:0, 0:1-1:1
+        AddGeneric(7, 4, 2, new List<string> { "2,1", "3,1" }, excludedTiles);
+
+        // Others (just examples, let's add more if they have space)
+        AddGeneric(3, 4, 3, new List<string> { "1,2", "2,2", "3,2" }, excludedTiles); // Other1
+        AddGeneric(2, 3, 3, null, excludedTiles); // More1
+        AddGeneric(8, 4, 1, null, excludedTiles); // More2 (1 row of 4)
 
         // Shuffle the pool
         var rng = new Random();
         _genericPool = _genericPool.OrderBy(x => rng.Next()).ToList();
     }
 
-    private void AddGeneric(int source, int rows, int cols, List<string> exclude = null)
+    private void AddGeneric(int source, int cols, int rows, List<string> localExclude, HashSet<string> globalExclude)
     {
         for (int y = 0; y < rows; y++)
         {
             for (int x = 0; x < cols; x++)
             {
-                string c = $"{x},{y}";
-                if (exclude != null && exclude.Contains(c)) continue;
-                _genericPool.Add((source, c));
+                string coords = $"{x},{y}";
+                if (localExclude != null && localExclude.Contains(coords)) continue;
+
+                string globalKey = $"{source}:{coords}";
+                if (globalExclude.Contains(globalKey)) continue;
+
+                _genericPool.Add((source, coords));
             }
         }
     }
@@ -205,7 +235,7 @@ public partial class WorldGenerator : Node
                             // Rank 1-5, Troops 1000-3000
                             int rankIdx = rng.Next(1, 4); // Regular to Captain
                             string rankTitle = GameConstants.GetRankTitle(rankIdx);
-                            int troops = GameConstants.GetMaxTroops(rankTitle);
+                            int troops = GameConstants.GetMaxTroopsByLevel(rankIdx);
                             // Ensure max_troops matches
                             ExecuteSql(conn, $"UPDATE officers SET faction_id = {fid}, rank = '{rankTitle}', troops = {troops}, max_troops = {troops} WHERE officer_id = {mid}");
                         }

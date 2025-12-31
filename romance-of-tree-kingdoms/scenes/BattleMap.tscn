@@ -1,8 +1,9 @@
-[gd_scene load_steps=4 format=3 uid="uid://j1623b21gxnv"]
+[gd_scene load_steps=5 format=3 uid="uid://j1623b21gxnv"]
 
 [ext_resource type="Script" uid="uid://dymfkak8xgwkr" path="res://scripts/logic/BattleController.cs" id="1_aai06"]
 [ext_resource type="Script" uid="uid://csfdwcpcxbrb2" path="res://scripts/ui/BattleGrid.cs" id="2_g3awa"]
 [ext_resource type="Script" uid="uid://dpl1or1pylm" path="res://scripts/logic/BattleCamera.cs" id="4_yvd20"]
+[ext_resource type="PackedScene" uid="uid://dt7tn4hi0jxxp" path="res://scenes/BattleGauge.tscn" id="5_gauge"]
 
 [node name="BattleMap" type="Node2D"]
 script = ExtResource("1_aai06")
@@ -14,55 +15,95 @@ script = ExtResource("2_g3awa")
 position = Vector2(255, 144)
 script = ExtResource("4_yvd20")
 
-[node name="Container" type="MarginContainer" parent="."]
-anchors_preset = 6
-anchor_left = 1.0
-anchor_top = 0.5
-anchor_right = 1.0
-anchor_bottom = 0.5
-offset_left = 251.0
-offset_top = -32.5
-offset_right = 480.0
-offset_bottom = -1.5
-grow_horizontal = 0
-grow_vertical = 2
-size_flags_horizontal = 8
+[node name="HUD" type="CanvasLayer" parent="."]
 
-[node name="HBoxContainer" type="HBoxContainer" parent="Container"]
+[node name="BattleGauge" parent="HUD" instance=ExtResource("5_gauge")]
+unique_name_in_owner = true
+
+[node name="Container" type="MarginContainer" parent="HUD"]
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -229.0
+offset_top = -40.0
+grow_horizontal = 0
+grow_vertical = 0
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="HBoxContainer" type="HBoxContainer" parent="HUD/Container"]
 visible = false
 layout_mode = 2
 size_flags_horizontal = 8
 size_flags_vertical = 0
-focus_behavior_recursive = 1
 
-[node name="-2xButton" type="Button" parent="Container/HBoxContainer"]
+[node name="-2xButton" type="Button" parent="HUD/Container/HBoxContainer"]
 layout_mode = 2
 text = "- 2x"
 
-[node name="-1xButton" type="Button" parent="Container/HBoxContainer"]
+[node name="-1xButton" type="Button" parent="HUD/Container/HBoxContainer"]
 layout_mode = 2
 text = "-1x"
 
-[node name="PlayPauseButton" type="Button" parent="Container/HBoxContainer"]
+[node name="PlayPauseButton" type="Button" parent="HUD/Container/HBoxContainer"]
 layout_mode = 2
 text = "Play"
 
-[node name="1xButton" type="Button" parent="Container/HBoxContainer"]
+[node name="1xButton" type="Button" parent="HUD/Container/HBoxContainer"]
 layout_mode = 2
 text = "1x"
 
-[node name="2xButton" type="Button" parent="Container/HBoxContainer"]
+[node name="2xButton" type="Button" parent="HUD/Container/HBoxContainer"]
 layout_mode = 2
 text = "2x"
 
-[node name="MarginContainer" type="MarginContainer" parent="."]
-offset_left = 143.0
-offset_top = 122.0
-offset_right = 384.0
-offset_bottom = 162.0
+[node name="ControlPanel" type="PanelContainer" parent="HUD"]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -150.0
+offset_top = -60.0
+offset_right = 150.0
+offset_bottom = -10.0
+grow_horizontal = 2
+grow_vertical = 0
 
-[node name="EndingLabel" type="Label" parent="MarginContainer"]
+[node name="HBox" type="HBoxContainer" parent="HUD/ControlPanel"]
+layout_mode = 2
+alignment = 1
+
+[node name="OfficerToggle" type="Button" parent="HUD/ControlPanel/HBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+toggle_mode = true
+button_pressed = true
+text = "Officer (1)"
+
+[node name="TroopsToggle" type="Button" parent="HUD/ControlPanel/HBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+toggle_mode = true
+button_pressed = true
+text = "Troops (2)"
+
+[node name="EndingContainer" type="CenterContainer" parent="HUD"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="EndingLabel" type="Label" parent="HUD/EndingContainer"]
 visible = false
 layout_mode = 2
-theme_override_font_sizes/font_size = 27
+theme_override_font_sizes/font_size = 48
 text = "VICTORY MESSAGE"
+horizontal_alignment = 1
+vertical_alignment = 1

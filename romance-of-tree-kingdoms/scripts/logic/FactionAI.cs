@@ -56,7 +56,7 @@ public partial class FactionAI : Node
         // 3. Fetch All Officers of this faction
         var officers = new List<AI_Officer_Stats>();
         var offCmd = conn.CreateCommand();
-        offCmd.CommandText = "SELECT officer_id, name, strength, politics, intelligence, leadership, is_commander FROM officers WHERE faction_id = $fid";
+        offCmd.CommandText = "SELECT officer_id, name, strength, politics, intelligence, leadership, is_commander FROM officers WHERE faction_id = $fid AND is_player = 0";
         offCmd.Parameters.AddWithValue("$fid", factionId);
         using (var reader = offCmd.ExecuteReader())
         {
@@ -535,7 +535,22 @@ public partial class FactionAI : Node
         targetCmd.Parameters.AddWithValue("$fid", factionId);
 
         var res = targetCmd.ExecuteScalar();
-        return res != null && res != DBNull.Value ? Convert.ToInt32(res) : 0;
+        int targetId = res != null && res != DBNull.Value ? Convert.ToInt32(res) : 0;
+        if (targetId > 0)
+        {
+            // Double check ownership in case of race condition
+            var ownCmd = conn.CreateCommand();
+            ownCmd.CommandText = "SELECT faction_id FROM cities WHERE city_id = $cid";
+            ownCmd.Parameters.AddWithValue("$cid", targetId);
+            var fIdObj = ownCmd.ExecuteScalar();
+            int fId = fIdObj != null && fIdObj != DBNull.Value ? Convert.ToInt32(fIdObj) : 0;
+            if (fId == factionId)
+            {
+                GD.PrintErr($"[FactionAI] FindExpansionTarget selected OWN city {targetId}! Faction query error?");
+                return 0;
+            }
+        }
+        return targetId;
     }
 
     private (string task, int targetId) GetWeeklyTask(SqliteConnection conn, int factionId)
@@ -619,7 +634,14 @@ public partial class FactionAI : Node
     {
         var list = new List<AI_Officer>();
         var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT officer_id, location_id, name, current_action_points, strength, is_commander FROM officers WHERE faction_id = $fid AND current_action_points > 0";
+        // Exclude Governors (except leaders) from being 'Idle' for reassignment/missions
+        cmd.CommandText = @"
+            SELECT o.officer_id, o.location_id, o.name, o.current_action_points, o.strength, o.is_commander 
+            FROM officers o
+            LEFT JOIN cities c ON o.officer_id = c.governor_id
+            WHERE o.faction_id = $fid 
+            AND o.current_action_points > 0
+            AND (c.governor_id IS NULL OR o.is_commander = 1)";
         cmd.Parameters.AddWithValue("$fid", factionId);
         using (var reader = cmd.ExecuteReader())
         {

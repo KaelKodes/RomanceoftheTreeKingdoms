@@ -7,6 +7,7 @@ using System.Linq;
 public partial class TurnManager : Node
 {
 	[Signal] public delegate void TurnStartedEventHandler(int factionId, bool isPlayer);
+	[Signal] public delegate void CouncilTriggeredEventHandler(int factionId, int cityId, int cpAmount);
 	[Signal] public delegate void TurnEndedEventHandler();
 	[Signal] public delegate void NewWeekStartedEventHandler();
 
@@ -32,57 +33,90 @@ public partial class TurnManager : Node
 	// Called by ActionManager.EndDay or directly from UI "End Turn" button
 	// But wait, user ends *their* turn. System ends *Day*.
 	// Let's separate it. 
-	// StartTurnCycle() -> logic -> EndTurn() -> Next...
+    // StartTurnCycle() -> logic -> EndTurn() -> Next...
 
-	public void EnsureTurnSystemStarted()
-	{
-		if (_turnQueue.Count == 0)
+    public void EnsureTurnSystemStarted()
+    {
+        if (_turnQueue.Count == 0)
+        {
+            GD.Print("Turn System Not Started. Initializing...");
+            StartNewDay();
+        }
+    }
+
+    public void StartNewDay()
+    {
+        GD.Print("\n--- Start New Day ---");
+        int currentDay = GetCurrentDay();
+
+        // 1. Check for Weekly Council (Day 1, 8, 15, 22...)
+        if (currentDay % 7 == 1)
+        {
+            var eligibility = GetPlayerCouncilData();
+            if (eligibility.isEligible)
+            {
+                GD.Print("[TurnManager] Weekly Council Triggered for Player.");
+                EmitSignal(SignalName.CouncilTriggered, eligibility.fid, eligibility.cid, eligibility.cp);
+                return; // PAUSE DAY START
+            }
+        }
+
+        ContinueStartNewDay(currentDay);
+    }
+
+    public void ResumeDayFromCouncil()
+    {
+        GD.Print("[TurnManager] Resuming Day from Council...");
+        ContinueStartNewDay(GetCurrentDay());
+    }
+
+    private void ContinueStartNewDay(int currentDay)
+    {
+		// If Turn Queue is missing (Loaded game?) or it's a new week, Roll Initiative
+		if (_turnQueue.Count == 0 || currentDay == 1 || (currentDay - 1) % 7 == 0)
 		{
-			GD.Print("Turn System Not Started. Initializing...");
-			StartNewDay();
-		}
-	}
-
-	public void StartNewDay()
-	{
-		int currentDay = GetCurrentDay();
-
-		// If Day 1 or (Day-1) % 7 == 0 (Weeks start on 1, 8, 15), Re-roll Initiative
-		if (currentDay == 1 || (currentDay - 1) % 7 == 0)
-		{
-			RollInitiative();
-			EmitSignal(SignalName.NewWeekStarted);
-
-			// AI Strategic Refresh & Repositioning
-			var ai = GetNode<FactionAI>("/root/FactionAI");
-			using (var conn = DatabaseHelper.GetConnection())
+			bool isNewWeek = (currentDay == 1 || (currentDay - 1) % 7 == 0);
+			if (isNewWeek || _turnQueue.Count == 0)
 			{
-				conn.Open();
-				var cmd = conn.CreateCommand();
-				cmd.CommandText = "SELECT faction_id FROM factions";
-				var fids = new List<int>();
-				using (var r = cmd.ExecuteReader())
-				{
-					while (r.Read()) fids.Add(r.GetInt32(0));
-				}
+				RollInitiative();
+				if (isNewWeek) EmitSignal(SignalName.NewWeekStarted);
+			}
 
-				// Monthly Cycle (approx 4 weeks)
-				if (currentDay == 1 || (currentDay - 1) % 28 == 0)
+			// Strategic Logic only on New Weeks
+			if (isNewWeek)
+			{
+				// AI Strategic Refresh & Repositioning
+				var ai = GetNode<FactionAI>("/root/FactionAI");
+				using (var conn = DatabaseHelper.GetConnection())
 				{
-					GD.Print("[TurnManager] NEW MONTH! Refreshing Strategic Goals...");
-					foreach (int fid in fids) ai.UpdateMonthlyGoal(conn, fid);
-				}
+					conn.Open();
+					var cmd = conn.CreateCommand();
+					cmd.CommandText = "SELECT faction_id FROM factions";
+					var fids = new List<int>();
+					using (var r = cmd.ExecuteReader())
+					{
+						while (r.Read()) fids.Add(r.GetInt32(0));
+					}
 
-				GD.Print("[TurnManager] NEW WEEK! Refreshing Weekly Tasks & Repositioning...");
-				foreach (int fid in fids)
-				{
-					ai.UpdateWeeklyTask(conn, fid);
-					ai.RepositionOfficers(conn, fid);
+					// Monthly Cycle (approx 4 weeks)
+					if (currentDay == 1 || (currentDay - 1) % 28 == 0)
+					{
+						GD.Print("[TurnManager] NEW MONTH! Refreshing Strategic Goals...");
+						foreach (int fid in fids) ai.UpdateMonthlyGoal(conn, fid);
+					}
+
+					GD.Print("[TurnManager] NEW WEEK! Refreshing Weekly Tasks & Repositioning...");
+					foreach (int fid in fids)
+					{
+						ai.UpdateWeeklyTask(conn, fid);
+						ai.RepositionOfficers(conn, fid);
+					}
 				}
 			}
 		}
 
 		_currentTurnIndex = -1;
+		GD.Print($"[TurnManager] Starting Day {currentDay}. Queue Count: {_turnQueue.Count}");
 		AdvanceTurn();
 	}
 
@@ -99,407 +133,520 @@ public partial class TurnManager : Node
 			// Get Faction Leaders and their stats
 			// Assuming Highest Rank or specific 'is_commander' flag. 
 			// For now, let's grab the officer with MAX(strategy) in the faction as the "Brain"
-			cmd.CommandText = @"
+            cmd.CommandText = @"
 				SELECT f.faction_id, MAX(o.intelligence) as strat, MAX(o.leadership) as lead
 				FROM factions f
 				JOIN officers o ON f.faction_id = o.faction_id
 				GROUP BY f.faction_id
 			";
 
-			using (var reader = cmd.ExecuteReader())
-			{
-				while (reader.Read())
-				{
-					int fid = reader.GetInt32(0);
-					int strat = reader.GetInt32(1);
-					int lead = reader.GetInt32(2);
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    int fid = reader.GetInt32(0);
+                    int strat = reader.GetInt32(1);
+                    int lead = reader.GetInt32(2);
 
-					float score = strat + (lead * 0.5f) + rng.Next(-10, 10);
-					factionScores[fid] = score;
-				}
-			}
+                    float score = strat + (lead * 0.5f) + rng.Next(-10, 10);
+                    factionScores[fid] = score;
+                }
+            }
 
-			// 2. Calculate Initiative for Player (Independent Turn - ID -1)
-			var playerCmd = conn.CreateCommand();
-			playerCmd.CommandText = "SELECT intelligence, leadership FROM officers WHERE is_player = 1";
-			using (var reader = playerCmd.ExecuteReader())
-			{
-				if (reader.Read())
-				{
-					int pStrat = reader.GetInt32(0);
-					int pLead = reader.GetInt32(1);
+            // 2. Calculate Initiative for Player (Independent Turn - ID -1)
+            var playerCmd = conn.CreateCommand();
+            playerCmd.CommandText = "SELECT intelligence, leadership FROM officers WHERE is_player = 1";
+            using (var reader = playerCmd.ExecuteReader())
+            {
+                if (reader.Read())
+                {
+                    int pStrat = reader.GetInt32(0);
+                    int pLead = reader.GetInt32(1);
 
-					float pScore = pStrat + (pLead * 0.5f) + rng.Next(-10, 10);
-					factionScores[-1] = pScore;
-				}
-			}
-		}
+                    float pScore = pStrat + (pLead * 0.5f) + rng.Next(-10, 10);
+                    factionScores[-1] = pScore;
+                }
+            }
+        }
 
-		// Sort AI factions by score descending, then add Player (-1) at the VERY END
-		_turnQueue = factionScores
-			.Where(x => x.Key != -1)
-			.OrderByDescending(x => x.Value)
-			.Select(x => x.Key)
-			.ToList();
+        // Sort AI factions by score descending, then add Player (-1) at the VERY END
+        _turnQueue = factionScores
+            .Where(x => x.Key != -1)
+            .OrderByDescending(x => x.Value)
+            .Select(x => x.Key)
+            .ToList();
 
-		if (factionScores.ContainsKey(-1))
-		{
-			_turnQueue.Add(-1);
-		}
+        if (factionScores.ContainsKey(-1))
+        {
+            _turnQueue.Add(-1);
+        }
 
-		GD.Print($"Initiative Rolled for Week! Order: {string.Join(", ", _turnQueue)}");
-	}
+        GD.Print($"Initiative Rolled for Week! Order: {string.Join(", ", _turnQueue)}");
+    }
 
-	private void AdvanceTurn()
-	{
-		_currentTurnIndex++;
+    private void AdvanceTurn()
+    {
+        _currentTurnIndex++;
 
-		if (_currentTurnIndex >= _turnQueue.Count)
-		{
-			// All turns done for the day
-			GD.Print("All turns complete. Checking for Conflicts...");
+        if (_currentTurnIndex >= _turnQueue.Count)
+        {
+            // All Faction turns done for the day. Proceed to Officer Phase.
+            GD.Print("[TurnManager] Faction Turns Complete. Starting Officer Phase...");
+            ProcessOfficerPhase();
+            return;
+        }
 
-			if (CheckForConflicts())
-			{
-				ResolveNextConflict();
-			}
-			else
-			{
-				EndDayCycle();
-			}
-			return;
-		}
+        int factionId = _turnQueue[_currentTurnIndex];
+        bool isPlayer = IsPlayerFaction(factionId);
 
-		int factionId = _turnQueue[_currentTurnIndex];
-		bool isPlayer = IsPlayerFaction(factionId);
+        GD.Print($"Turn Start: Faction {factionId} (Player: {isPlayer})");
+        EmitSignal(SignalName.TurnStarted, factionId, isPlayer);
 
-		GD.Print($"Turn Start: Faction {factionId} (Player: {isPlayer})");
-		EmitSignal(SignalName.TurnStarted, factionId, isPlayer);
+        if (isPlayer)
+        {
+            // Unlock UI, wait for user to click "End Turn"
+            _isTurnActive = true;
+        }
+        else
+        {
+            // AI Turn
+            // Trigger FactionAI
+            var ai = GetNode<FactionAI>("/root/FactionAI");
+            ai.ProcessTurn(factionId);
+        }
+    }
 
-		if (isPlayer)
-		{
-			// Unlock UI, wait for user to click "End Turn"
-			_isTurnActive = true;
-		}
-		else
-		{
-			// AI Turn
-			// Trigger FactionAI
-			var ai = GetNode<FactionAI>("/root/FactionAI");
-			ai.ProcessTurn(factionId);
-		}
-	}
+    // Call this when Player clicks "End Turn"
+    public void PlayerEndTurn()
+    {
+        if (_isTurnActive)
+        {
+            _isTurnActive = false;
+            EndTurn();
+        }
+    }
 
-	// Call this when Player clicks "End Turn"
-	public void PlayerEndTurn()
-	{
-		if (_isTurnActive)
-		{
-			_isTurnActive = false;
-			EndTurn();
-		}
-	}
+    // Call this when AI finishes
+    public void AIEndTurn()
+    {
+        EndTurn();
+    }
 
-	// Call this when AI finishes
-	public void AIEndTurn()
-	{
-		EndTurn();
-	}
+    private void EndTurn()
+    {
+        EmitSignal(SignalName.TurnEnded);
+        AdvanceTurn();
+    }
 
-	private void EndTurn()
-	{
-		EmitSignal(SignalName.TurnEnded);
-		AdvanceTurn();
-	}
+    private void ProcessOfficerPhase()
+    {
+        // Trigger ActionManager to process all NPC daily actions
+        var am = GetNode<ActionManager>("/root/ActionManager");
+        am.ProcessAllOfficerTurns();
 
-	private bool IsPlayerFaction(int factionId)
-	{
-		// ID -1 is explicitly the independent Player turn
-		if (factionId == -1) return true;
+        // After all officers have moved, check for conflicts
+        GD.Print("[TurnManager] Officer Phase Complete. Checking for Conflicts...");
+        if (CheckForConflicts())
+        {
+            ResolveNextConflict();
+        }
+        else
+        {
+            EndDayCycle();
+        }
+    }
 
-		// Otherwise, check if player is the LEADER of this faction
-		using (var conn = DatabaseHelper.GetConnection())
-		{
-			conn.Open();
-			var cmd = conn.CreateCommand();
+    private bool IsPlayerFaction(int factionId)
+    {
+        // ID -1 is explicitly the independent Player turn
+        if (factionId == -1) return true;
+
+        // Otherwise, check if player is the LEADER of this faction
+        using (var conn = DatabaseHelper.GetConnection())
+        {
+            conn.Open();
+            var cmd = conn.CreateCommand();
 			cmd.CommandText = "SELECT count(*) FROM officers WHERE is_player = 1 AND faction_id = $fid AND rank = 'Commander'";
-			cmd.Parameters.AddWithValue("$fid", factionId);
-			long count = (long)cmd.ExecuteScalar();
-			return count > 0;
-		}
-	}
+            cmd.Parameters.AddWithValue("$fid", factionId);
+            long count = (long)cmd.ExecuteScalar();
+            return count > 0;
+        }
+    }
 
-	private int GetCurrentDay()
-	{
-		using (var conn = DatabaseHelper.GetConnection())
-		{
-			conn.Open();
-			var cmd = conn.CreateCommand();
-			cmd.CommandText = "SELECT current_day FROM game_state LIMIT 1";
-			var result = cmd.ExecuteScalar();
-			return result != null ? Convert.ToInt32(result) : 1;
-		}
-	}
+    private (bool isEligible, int fid, int cid, int cp) GetPlayerCouncilData()
+    {
+        using (var conn = DatabaseHelper.GetConnection())
+        {
+            conn.Open();
+            // 1. Is Leader?
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT faction_id, leader_id FROM factions WHERE leader_id = (SELECT officer_id FROM officers WHERE is_player = 1)";
+            using (var r = cmd.ExecuteReader())
+            {
+                if (r.Read())
+                {
+                    int fid = r.GetInt32(0);
+                    // Leaders hold council in their current city
+                    r.Close();
+                    var locCmd = conn.CreateCommand();
+                    locCmd.CommandText = "SELECT location_id FROM officers WHERE is_player = 1";
+                    int cid = Convert.ToInt32(locCmd.ExecuteScalar());
+                    return (true, fid, cid, GameConstants.CP_RULER);
+                }
+            }
 
-	private void ProcessCityDecay()
-	{
-		GD.Print("[TurnManager] Processing City Decay...");
-		using (var conn = DatabaseHelper.GetConnection())
-		{
-			conn.Open();
-			// Get all owned cities
-			var cmd = conn.CreateCommand();
-			cmd.CommandText = "SELECT city_id, name, faction_id, decay_turns FROM cities WHERE faction_id > 0";
+            // 2. Is Governor?
+            var govCmd = conn.CreateCommand();
+            govCmd.CommandText = "SELECT city_id, faction_id FROM cities WHERE governor_id = (SELECT officer_id FROM officers WHERE is_player = 1)";
+            using (var r = govCmd.ExecuteReader())
+            {
+                if (r.Read())
+                {
+                    return (true, r.GetInt32(1), r.GetInt32(0), GameConstants.CP_GOVERNOR);
+                }
+            }
+        }
+        return (false, 0, 0, 0);
+    }
 
-			var citiesToCheck = new List<(int id, string name, int fid, int turns)>();
-			using (var reader = cmd.ExecuteReader())
-			{
-				while (reader.Read())
-				{
-					citiesToCheck.Add((
-						reader.GetInt32(0),
-						reader.GetString(1),
-						reader.GetInt32(2),
-						reader.IsDBNull(3) ? 0 : reader.GetInt32(3)
-					));
-				}
-			}
+    private int GetCurrentDay()
+    {
+        using (var conn = DatabaseHelper.GetConnection())
+        {
+            conn.Open();
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT current_day FROM game_state LIMIT 1";
+            var result = cmd.ExecuteScalar();
+            return result != null ? Convert.ToInt32(result) : 1;
+        }
+    }
 
-			foreach (var c in citiesToCheck)
-			{
-				// Check for officers
-				var offCmd = conn.CreateCommand();
-				offCmd.CommandText = "SELECT count(*) FROM officers WHERE location_id = $cid AND faction_id = $fid";
-				offCmd.Parameters.AddWithValue("$cid", c.id);
-				offCmd.Parameters.AddWithValue("$fid", c.fid);
-				long officerCount = (long)offCmd.ExecuteScalar();
+    private void ProcessCityDecay()
+    {
+        GD.Print("[TurnManager] Processing City Decay...");
+        using (var conn = DatabaseHelper.GetConnection())
+        {
+            conn.Open();
+            // Get all owned cities
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT city_id, name, faction_id, decay_turns FROM cities WHERE faction_id > 0";
 
-				if (officerCount > 0)
-				{
-					if (c.turns > 0)
-					{
-						// Reset Decay
-						ExecuteSql(conn, $"UPDATE cities SET decay_turns = 0 WHERE city_id = {c.id}");
-						GD.Print($"[Decay] {c.name} is occupied. Decay reset.");
-					}
-				}
-				else
-				{
-					// Increment Decay
-					int newDecay = c.turns + 1;
-					if (newDecay >= 3)
-					{
-						// LOST CITY
-						ExecuteSql(conn, $"UPDATE cities SET faction_id = NULL, decay_turns = 0 WHERE city_id = {c.id}");
-						GD.Print($"[Decay] {c.name} has been abandoned too long! Reverted to Neutral.");
-					}
-					else
-					{
-						ExecuteSql(conn, $"UPDATE cities SET decay_turns = {newDecay} WHERE city_id = {c.id}");
-						GD.Print($"[Decay] {c.name} is empty! Decay: {newDecay}/3");
-					}
-					ActionManager.Instance.EmitSignal(ActionManager.SignalName.MapStateChanged);
-				}
-			}
-		}
+            var citiesToCheck = new List<(int id, string name, int fid, int turns)>();
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    citiesToCheck.Add((
+                        reader.GetInt32(0),
+                        reader.GetString(1),
+                        reader.GetInt32(2),
+                        reader.IsDBNull(3) ? 0 : reader.GetInt32(3)
+                    ));
+                }
+            }
 
-	}
+            foreach (var c in citiesToCheck)
+            {
+                // Check for officers
+                var offCmd = conn.CreateCommand();
+                offCmd.CommandText = "SELECT count(*) FROM officers WHERE location_id = $cid AND faction_id = $fid";
+                offCmd.Parameters.AddWithValue("$cid", c.id);
+                offCmd.Parameters.AddWithValue("$fid", c.fid);
+                long officerCount = (long)offCmd.ExecuteScalar();
 
-	// Conflict Resolution
+                if (officerCount > 0)
+                {
+                    if (c.turns > 0)
+                    {
+                        // Reset Decay
+                        ExecuteSql(conn, $"UPDATE cities SET decay_turns = 0 WHERE city_id = {c.id}");
+                        GD.Print($"[Decay] {c.name} is occupied. Decay reset.");
+                    }
+                }
+                else
+                {
+                    // Increment Decay
+                    int newDecay = c.turns + 1;
+                    if (newDecay >= 3)
+                    {
+                        // LOST CITY
+                        ExecuteSql(conn, $"UPDATE cities SET faction_id = NULL, decay_turns = 0 WHERE city_id = {c.id}");
+                        GD.Print($"[Decay] {c.name} has been abandoned too long! Reverted to Neutral.");
+                    }
+                    else
+                    {
+                        ExecuteSql(conn, $"UPDATE cities SET decay_turns = {newDecay} WHERE city_id = {c.id}");
+                        GD.Print($"[Decay] {c.name} is empty! Decay: {newDecay}/3");
+                    }
+                    ActionManager.Instance.EmitSignal(ActionManager.SignalName.MapStateChanged);
+                }
+            }
+        }
 
+    }
 
-	private bool CheckForConflicts()
-	{
-		_conflictQueue.Clear();
-		using (var conn = DatabaseHelper.GetConnection())
-		{
-			conn.Open();
-			var cmd = conn.CreateCommand();
-			cmd.CommandText = "SELECT location_id, attacker_faction_id, source_location_id FROM pending_battles";
-			using (var reader = cmd.ExecuteReader())
-			{
-				while (reader.Read())
-				{
-					int loc = reader.GetInt32(0);
-					int att = reader.GetInt32(1);
-					int src = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
-					_conflictQueue.Enqueue((loc, att, src));
-				}
-			}
-		}
-		return _conflictQueue.Count > 0;
-	}
-
-	private void ResolveNextConflict()
-	{
-		if (_conflictQueue.Count == 0)
-		{
-			EndDayCycle();
-			return;
-		}
-
-		var conflict = _conflictQueue.Dequeue();
-		int cityId = conflict.cityId;
-		int attackerFactionId = conflict.attackerFactionId;
-		int sourceCityId = conflict.sourceCityId;
-
-		// Check if player is involved
-		var bm = GetNode<BattleManager>("/root/BattleManager");
-		bm.CreateContext(cityId, sourceCityId);         // Check if player is involved (Anywhere in the city)
-		bool playerInvolved = bm.CurrentContext.AllOfficers.Any(o => o.IsPlayer);
-
-		if (playerInvolved)
-		{
-			GD.Print("Player involved in conflict! Loading Battle Scene...");
-
-			// Close WorldMap Menus to prevent overlap
-			var worldMap = GetTree().Root.FindChild("WorldMap", true, false) as WorldMap;
-			if (IsInstanceValid(worldMap))
-			{
-				worldMap.CityMenuDialog?.Hide();
-				worldMap.OfficerCardDialog?.Hide();
-			}
-
-			// Try to find existing BattleSetupUI (e.g. permanent one in WorldMap)
-			var existingUI = GetTree().Root.FindChild("BattleSetupUI", true, false) as BattleSetupUI;
-			if (IsInstanceValid(existingUI))
-			{
-				GD.Print("Found existing BattleSetupUI. Opening...");
-				existingUI.Open();
-			}
-			else
-			{
-				GD.Print("No existing BattleSetupUI found. Instantiating new one...");
-				var scene = GD.Load<PackedScene>("res://scenes/BattleSetupUI.tscn");
-				GetTree().Root.AddChild(scene.Instantiate());
-			}
-			// Note: BattleSetupUI usually loads Map immediately. 
-			// We need to ensure when Battle ends, it calls ResumeConflictResolution.
-		}
-		else
-		{
-			GD.Print($"AI Conflict at City {cityId}. Attacker Faction: {attackerFactionId}. Simulating...");
-			// Simulate immediately
-			// Find an officer belonging to the identified Attacker Faction
-			int attId = 0;
-			var champion = bm.CurrentContext.AttackerOfficers
-				.Where(o => o.FactionId == attackerFactionId)
-				.OrderByDescending(o => o.Strength) // Strongest leads
-				.FirstOrDefault();
-
-			if (champion != null)
-			{
-				attId = champion.OfficerId;
-			}
-			else
-			{
-				// Fallback: If no officer of that faction is physically present (Bug? Or they left?), 
-				// pick ANY attacker to prevent stuck logic, but log warning.
-				GD.PrintErr($"[ResolveNextConflict] No officer of faction {attackerFactionId} found at {cityId}! Picking random attacker.");
-				attId = bm.CurrentContext.AttackerOfficers.FirstOrDefault()?.OfficerId ?? 0;
-			}
-
-			bm.SimulateBattle(attId, cityId);
-
-			// Remove from pending
-			ResolvePendingBattleDB(cityId);
-
-			// Next
-			CallDeferred(nameof(ResolveNextConflict));
-		}
-	}
-	public void ResumeConflictResolution(int resolvedCityId = -1)
-	{
-		// Called by BattleManager after Player Battle
-		if (resolvedCityId > 0)
-		{
-			ResolvePendingBattleDB(resolvedCityId);
-		}
-		else if (BattleManager.Instance.CurrentContext != null)
-		{
-			ResolvePendingBattleDB(BattleManager.Instance.CurrentContext.LocationId);
-		}
-		ResolveNextConflict();
-	}
-
-	private void ResolvePendingBattleDB(int cityId)
-	{
-		using (var conn = DatabaseHelper.GetConnection())
-		{
-			conn.Open();
-			var cmd = conn.CreateCommand();
-			cmd.CommandText = "DELETE FROM pending_battles WHERE location_id = $id";
-			cmd.Parameters.AddWithValue("$id", cityId);
-			cmd.ExecuteNonQuery();
-			ActionManager.Instance.EmitSignal(ActionManager.SignalName.MapStateChanged);
-		}
-	}
+    // Conflict Resolution
 
 
-	private void EndDayCycle()
-	{
-		ProcessCityDecay();
+    private bool CheckForConflicts()
+    {
+        _conflictQueue.Clear();
+        using (var conn = DatabaseHelper.GetConnection())
+        {
+            conn.Open();
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT location_id, attacker_faction_id, source_location_id FROM pending_battles";
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    int loc = reader.GetInt32(0);
+                    int att = reader.GetInt32(1);
+                    int src = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
+                    _conflictQueue.Enqueue((loc, att, src));
+                }
+            }
+        }
+        return _conflictQueue.Count > 0;
+    }
 
-		int currentDay = GetCurrentDay();
-		if (currentDay % 7 == 0)
-		{
-			ProcessWeeklyHarvest();
-		}
+    private void ResolveNextConflict()
+    {
+        if (_conflictQueue.Count == 0)
+        {
+            EndDayCycle();
+            return;
+        }
 
-		// Ronin Agency: Independent officers can join factions if they like them
-		FactionAI.Instance.ProcessRoninTurns();
+        var conflict = _conflictQueue.Dequeue();
+        int cityId = conflict.cityId;
+        int attackerFactionId = conflict.attackerFactionId;
+        int sourceCityId = conflict.sourceCityId;
 
-		var am = GetNode<ActionManager>("/root/ActionManager");
-		am.EndDay();
+        // Check if player is involved
+        var bm = GetNode<BattleManager>("/root/BattleManager");
+        bm.CreateContext(cityId, sourceCityId);         // Check if player is involved (Anywhere in the city)
+        bool playerInvolved = bm.CurrentContext.AllOfficers.Any(o => o.IsPlayer);
 
-		StartNewDay();
-	}
+        if (playerInvolved)
+        {
+            GD.Print("Player involved in conflict! Loading Battle Scene...");
 
-	private void ProcessWeeklyHarvest()
-	{
-		GD.Print("[TurnManager] Processing Weekly Harvest (Tax & Agri)...");
-		using (var conn = DatabaseHelper.GetConnection())
-		{
-			conn.Open();
+            // Close WorldMap Menus to prevent overlap
+            var worldMap = GetTree().Root.FindChild("WorldMap", true, false) as WorldMap;
+            if (IsInstanceValid(worldMap))
+            {
+                worldMap.CityMenuDialog?.Hide();
+                worldMap.OfficerCardDialog?.Hide();
+            }
 
-			// For each faction, sum their city yields
-			var cmd = conn.CreateCommand();
-			cmd.CommandText = @"
-                SELECT 
-                    f.faction_id, 
-                    SUM(c.commerce * (CAST(c.public_order AS FLOAT) / 100.0)) as gold_yield,
-                    SUM(c.agriculture * (CAST(c.public_order AS FLOAT) / 100.0)) as food_yield
-                FROM factions f
-                JOIN cities c ON f.faction_id = c.faction_id
-				GROUP BY f.faction_id";
+            // Try to find existing BattleSetupUI (e.g. permanent one in WorldMap)
+            var existingUI = GetTree().Root.FindChild("BattleSetupUI", true, false) as BattleSetupUI;
+            if (IsInstanceValid(existingUI))
+            {
+                GD.Print("Found existing BattleSetupUI. Opening...");
+                // Ensure it is on TOP of the new scene (WorldMap might have been reloaded)
+                existingUI.GetParent()?.MoveChild(existingUI, -1);
+                existingUI.Open();
+            }
+            else
+            {
+                GD.Print("No existing BattleSetupUI found. Instantiating new one...");
+                var scene = GD.Load<PackedScene>("res://scenes/BattleSetupUI.tscn");
+                var instance = scene.Instantiate() as BattleSetupUI;
+                GetTree().Root.AddChild(instance);
+                instance.Open(); // Explicitly open in case it was hidden or default invisible
+            }
+            // Note: BattleSetupUI usually loads Map immediately. 
+            // We need to ensure when Battle ends, it calls ResumeConflictResolution.
+        }
+        else
+        {
+            GD.Print($"AI Conflict at City {cityId}. Attacker Faction: {attackerFactionId}. Simulating...");
+            // Simulate immediately
+            // Find an officer belonging to the identified Attacker Faction
+            int attId = 0;
+            var champion = bm.CurrentContext.AttackerOfficers
+                .Where(o => o.FactionId == attackerFactionId)
+                .OrderByDescending(o => o.Strength) // Strongest leads
+                .FirstOrDefault();
 
-			var updates = new List<(int fid, int gold, int food)>();
-			using (var reader = cmd.ExecuteReader())
-			{
-				while (reader.Read())
-				{
-					updates.Add((
-						Convert.ToInt32(reader.GetValue(0)),
-						(int)reader.GetDouble(1),
-						(int)reader.GetDouble(2) * 10 // Food is usually higher volume
-					));
-				}
-			}
+            if (champion != null)
+            {
+                attId = champion.OfficerId;
+            }
+            else
+            {
+                // Fallback: If no officer of that faction is physically present (Bug? Or they left?), 
+                // pick ANY attacker to prevent stuck logic, but log warning.
+                GD.PrintErr($"[ResolveNextConflict] No officer of faction {attackerFactionId} found at {cityId}! Picking random attacker.");
+                attId = bm.CurrentContext.AttackerOfficers.FirstOrDefault()?.OfficerId ?? 0;
+            }
 
-			foreach (var u in updates)
-			{
-				ExecuteSql(conn, $"UPDATE factions SET gold = gold + {u.gold}, supplies = supplies + {u.food} WHERE faction_id = {u.fid}");
-				GD.Print($"[Harvest] Faction {u.fid} collected {u.gold} Gold and {u.food} Supplies.");
-			}
-		}
-	}
+            bm.SimulateBattle(attId, cityId);
 
-	private void ExecuteSql(SqliteConnection conn, string sql)
-	{
-		using (var cmd = conn.CreateCommand())
-		{
-			cmd.CommandText = sql;
-			cmd.ExecuteNonQuery();
-		}
-	}
+            // Remove from pending
+            ResolvePendingBattleDB(cityId);
+
+            // Next
+            CallDeferred(nameof(ResolveNextConflict));
+        }
+    }
+    public void ResumeConflictResolution(int resolvedCityId = -1)
+    {
+        // Called by BattleManager after Player Battle
+        if (resolvedCityId > 0)
+        {
+            ResolvePendingBattleDB(resolvedCityId);
+        }
+        else if (BattleManager.Instance.CurrentContext != null)
+        {
+            ResolvePendingBattleDB(BattleManager.Instance.CurrentContext.LocationId);
+        }
+        ResolveNextConflict();
+    }
+
+    private void ResolvePendingBattleDB(int cityId)
+    {
+        using (var conn = DatabaseHelper.GetConnection())
+        {
+            conn.Open();
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = "DELETE FROM pending_battles WHERE location_id = $id";
+            cmd.Parameters.AddWithValue("$id", cityId);
+            cmd.ExecuteNonQuery();
+            ActionManager.Instance.EmitSignal(ActionManager.SignalName.MapStateChanged);
+        }
+    }
+
+
+    private void EndDayCycle()
+    {
+        ProcessCityDecay();
+
+        int currentDay = GetCurrentDay();
+        ProcessDailyLogistics(currentDay);
+
+        // Ronin Agency: Independent officers can join factions if they like them
+        FactionAI.Instance.ProcessRoninTurns();
+
+        var am = GetNode<ActionManager>("/root/ActionManager");
+        am.EndDay();
+
+        StartNewDay();
+    }
+
+    private void ProcessDailyLogistics(int day)
+    {
+        using (var conn = DatabaseHelper.GetConnection())
+        {
+            conn.Open();
+
+            // 1. Weekly: Merit Review & "Top Contributor"
+            if (day % 7 == 0)
+            {
+                ProcessWeeklyMeritReview(conn);
+            }
+
+            // 2. Monthly: Taxation & Salaries
+            if (day % 30 == 0)
+            {
+                ProcessMonthlyEconomics(conn);
+            }
+
+            // 3. Quarterly: Harvest (Supplies) - July (Day 180ish) and others
+            if (day % 90 == 0)
+            {
+                ProcessQuarterlyHarvest(conn);
+            }
+        }
+    }
+
+    private void ProcessWeeklyMeritReview(SqliteConnection conn)
+    {
+        GD.Print("[Logistics] Weekly Merit Review...");
+        // Reward Top Contributor in each city or faction
+        // For simplicity: Top 1 in entire world gets big bonus, top of each faction gets small bonus
+
+        var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            SELECT officer_id, faction_id, merit_score, name 
+            FROM officers 
+            WHERE merit_score > 0 
+			ORDER BY merit_score DESC";
+
+        bool worldFirst = true;
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read())
+            {
+                int oid = r.GetInt32(0);
+                int fid = r.IsDBNull(1) ? 0 : r.GetInt32(1);
+                int merit = r.GetInt32(2);
+                string name = r.GetString(3);
+
+                int goldBonus = worldFirst ? 500 : 100;
+                int repBonus = worldFirst ? 50 : 20;
+
+                ExecuteSql(conn, $"UPDATE officers SET gold = gold + {goldBonus}, reputation = reputation + {repBonus} WHERE officer_id = {oid}");
+                GD.Print($"[Weekly Review] {name} awarded {goldBonus} Gold and {repBonus} Rep for Merit ({merit})!");
+
+                worldFirst = false; // Only first one gets the big prize
+            }
+        }
+
+        // Reset merit for next week
+        ExecuteSql(conn, "UPDATE officers SET merit_score = 0");
+    }
+
+    private void ProcessMonthlyEconomics(SqliteConnection conn)
+    {
+        GD.Print("[Logistics] Monthly Economics (Taxes & Salaries)...");
+
+        // 1. Collect Taxes into Faction Treasury
+        // Formula: City Commerce * Faction Tax Rate
+        ExecuteSql(conn, @"
+            UPDATE factions SET gold_treasury = gold_treasury + (
+                SELECT SUM(c.commerce * f.tax_rate) 
+                FROM cities c, factions f
+                WHERE c.faction_id = f.faction_id 
+                AND f.faction_id = factions.faction_id
+            )
+			WHERE faction_id IN (SELECT DISTINCT faction_id FROM cities)");
+
+        // 2. Pay Salaries (Deduct from Treasury) - Base 100 gold per officer
+        ExecuteSql(conn, @"
+            UPDATE factions SET gold_treasury = gold_treasury - (
+                SELECT COUNT(*) * 100 
+                FROM officers o 
+                WHERE o.faction_id = factions.faction_id
+			)");
+
+        // Check for Bankruptcy: If gold_treasury < 0, satisfaction drops
+        ExecuteSql(conn, @"
+            UPDATE officers 
+            SET satisfaction = satisfaction - 20 
+			WHERE faction_id IN (SELECT faction_id FROM factions WHERE gold_treasury < 0)");
+    }
+
+    private void ProcessQuarterlyHarvest(SqliteConnection conn)
+    {
+        GD.Print("[Logistics] Quarterly Harvest (Supplies)...");
+        ExecuteSql(conn, @"
+            UPDATE factions SET supplies = supplies + (
+                SELECT SUM(agriculture * 10) 
+                FROM cities 
+                WHERE cities.faction_id = factions.faction_id
+            )
+			WHERE faction_id IN (SELECT DISTINCT faction_id FROM cities)");
+    }
+
+    private void ExecuteSql(SqliteConnection conn, string sql)
+    {
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = sql;
+            cmd.ExecuteNonQuery();
+        }
+    }
 }

@@ -167,8 +167,9 @@ public partial class BattleSetupUI : Control
 		var nameLbl = new Label();
 		nameLbl.Text = off.Name;
 		nameLbl.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		int level = GameConstants.GetLevelByRankName(off.Rank);
 		if (off.IsPlayer) nameLbl.Modulate = Colors.Gold;
-		else if (off.Rank == "Sovereign" || off.Rank == "Commander") nameLbl.Modulate = new Color(1, 0.6f, 0.6f); // Reddish for commanders
+		else if (level >= 9) nameLbl.Modulate = new Color(1, 0.6f, 0.6f); // Reddish for top ranks
 		hbox.AddChild(nameLbl);
 
 		// Stats

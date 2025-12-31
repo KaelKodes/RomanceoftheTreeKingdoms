@@ -405,14 +405,8 @@ public partial class ActionManager : Node
 
 	public void CheckPromotions(int officerId, SqliteConnection conn)
 	{
-		// Gates:
-		// Regular: 100 Rep, 1 Win
-		// Officer: 300 Rep, 3 Wins
-		// Captain: 800 Rep, 5 Wins
-		// General: 1500 Rep, 10 Wins
-
 		var cmd = conn.CreateCommand();
-		cmd.CommandText = "SELECT name, rank, reputation, battles_won, max_troops FROM officers WHERE officer_id = $oid";
+		cmd.CommandText = "SELECT name, rank, reputation, max_troops FROM officers WHERE officer_id = $oid";
 		cmd.Parameters.AddWithValue("$oid", officerId);
 
 		using (var r = cmd.ExecuteReader())
@@ -421,89 +415,81 @@ public partial class ActionManager : Node
 			string name = r.GetString(0);
 			string rank = r.GetString(1);
 			int rep = r.IsDBNull(2) ? 0 : r.GetInt32(2);
-			int wins = r.IsDBNull(3) ? 0 : r.GetInt32(3);
-			int maxTroops = r.IsDBNull(4) ? 0 : r.GetInt32(4);
+			int maxTroops = r.IsDBNull(3) ? 0 : r.GetInt32(3);
 
-			string newRank = rank;
-			int newMaxTroops = maxTroops;
+			int currentLevel = GetRankLevel(rank);
+			if (currentLevel >= 10) return; // Sovereign/Max reached
 
-			// Sovereigns are at the highest rank and don't need promotion checks
-			if (rank == GameConstants.RANK_SOVEREIGN || rank == "Sovereign") return;
-
-			// Promotion Logic (Smoothed gates)
-			if (rep >= 1000) { newRank = GameConstants.RANK_GENERAL; newMaxTroops = GameConstants.TROOPS_GENERAL; }
-			else if (rep >= 400) { newRank = GameConstants.RANK_CAPTAIN; newMaxTroops = GameConstants.TROOPS_CAPTAIN; }
-			else if (rep >= 150) { newRank = GameConstants.RANK_OFFICER; newMaxTroops = GameConstants.TROOPS_OFFICER; }
-			else if (rep >= 50) { newRank = GameConstants.RANK_REGULAR; newMaxTroops = GameConstants.TROOPS_REGULAR; }
-
-			if (newRank != rank)
+			// Find highest qualifying level
+			int targetLevel = currentLevel;
+			for (int l = 1; l <= 10; l++)
 			{
-				int currentLevel = GetRankLevel(rank);
-				int newLevel = GetRankLevel(newRank);
-
-				GD.Print($"[PromotionCheck] Officer {officerId} ({name}): Current Rank={rank} (Lvl {currentLevel}), Target Rank={newRank} (Lvl {newLevel}). Rep={rep}, Wins={wins}");
-
-				if (newLevel > currentLevel)
+				if (rep >= GameConstants.GetRequiredRep(l))
 				{
-					int troopGain = newMaxTroops - maxTroops;
-					r.Close(); // Close reader to execute update
-
-					// Check if player for stat points
-					var checkPlayerCmd = conn.CreateCommand();
-					checkPlayerCmd.CommandText = "SELECT is_player, strength, leadership, intelligence, politics, charisma FROM officers WHERE officer_id = $oid";
-					checkPlayerCmd.Parameters.AddWithValue("$oid", officerId);
-					bool isPlayer = false;
-					int s = 0, l = 0, i = 0, p = 0, c = 0;
-					using (var r2 = checkPlayerCmd.ExecuteReader())
-					{
-						if (r2.Read())
-						{
-							isPlayer = r2.GetInt32(0) == 1;
-							s = r2.GetInt32(1); l = r2.GetInt32(2); i = r2.GetInt32(3); p = r2.GetInt32(4); c = r2.GetInt32(5);
-						}
-					}
-
-					var upCmd = conn.CreateCommand();
-					if (isPlayer)
-					{
-						upCmd.CommandText = @"
-							UPDATE officers 
-							SET rank = $rnk, 
-								max_troops = $mt, 
-								troops = troops + $gain, 
-								last_promotion_day = (SELECT current_day FROM game_state), 
-								stat_points = stat_points + 5,
-								base_strength = $s, base_leadership = $l, base_intelligence = $i, base_politics = $p, base_charisma = $c
-							WHERE officer_id = $oid";
-						upCmd.Parameters.AddWithValue("$s", s);
-						upCmd.Parameters.AddWithValue("$l", l);
-						upCmd.Parameters.AddWithValue("$i", i);
-						upCmd.Parameters.AddWithValue("$p", p);
-						upCmd.Parameters.AddWithValue("$c", c);
-					}
-					else
-					{
-						upCmd.CommandText = "UPDATE officers SET rank = $rnk, max_troops = $mt, troops = troops + $gain, last_promotion_day = (SELECT current_day FROM game_state) WHERE officer_id = $oid";
-					}
-
-					upCmd.Parameters.AddWithValue("$rnk", newRank);
-					upCmd.Parameters.AddWithValue("$mt", newMaxTroops);
-					upCmd.Parameters.AddWithValue("$gain", troopGain);
-					upCmd.Parameters.AddWithValue("$oid", officerId);
-					upCmd.ExecuteNonQuery();
-
-					GD.Print($"PROMOTION SUCCESS! {name} has reached the rank of {newRank}! (+{troopGain} troops)");
-					if (isPlayer) EmitSignal(SignalName.PlayerStatsChanged);
+					targetLevel = l;
 				}
+				else break;
 			}
-			else if (rep >= 100) // Log if they qualify but are already there or somehow stuck
+
+			if (targetLevel > currentLevel)
 			{
-				// GD.Print($"[PromotionCheck] Officer {officerId} ({name}) already at correct rank {rank} for stats (Rep={rep}, Wins={wins}).");
+				string newRank = GameConstants.GetRankTitle(targetLevel);
+				int newMaxTroops = GameConstants.GetMaxTroopsByLevel(targetLevel);
+				int troopGain = newMaxTroops - maxTroops;
+
+				r.Close(); // Close reader to update
+
+				// Check if player for stat points
+				var checkPlayerCmd = conn.CreateCommand();
+				checkPlayerCmd.CommandText = "SELECT is_player, strength, leadership, intelligence, politics, charisma FROM officers WHERE officer_id = $oid";
+				checkPlayerCmd.Parameters.AddWithValue("$oid", officerId);
+				bool isPlayer = false;
+				int s = 0, l = 0, i = 0, p = 0, c = 0;
+				using (var r2 = checkPlayerCmd.ExecuteReader())
+				{
+					if (r2.Read())
+					{
+						isPlayer = r2.GetInt32(0) == 1;
+						s = r2.GetInt32(1); l = r2.GetInt32(2); i = r2.GetInt32(3); p = r2.GetInt32(4); c = r2.GetInt32(5);
+					}
+				}
+
+				var upCmd = conn.CreateCommand();
+				if (isPlayer)
+				{
+					upCmd.CommandText = @"
+                        UPDATE officers 
+                        SET rank = $rnk, 
+                            max_troops = $mt, 
+                            troops = MIN($mt, troops + $gain), 
+                            last_promotion_day = (SELECT current_day FROM game_state), 
+                            stat_points = stat_points + 5,
+                            base_strength = $s, base_leadership = $l, base_intelligence = $i, base_politics = $p, base_charisma = $c
+						WHERE officer_id = $oid";
+					upCmd.Parameters.AddWithValue("$s", s);
+					upCmd.Parameters.AddWithValue("$l", l);
+					upCmd.Parameters.AddWithValue("$i", i);
+					upCmd.Parameters.AddWithValue("$p", p);
+					upCmd.Parameters.AddWithValue("$c", c);
+				}
+				else
+				{
+					upCmd.CommandText = "UPDATE officers SET rank = $rnk, max_troops = $mt, troops = MIN($mt, troops + $gain), last_promotion_day = (SELECT current_day FROM game_state) WHERE officer_id = $oid";
+				}
+
+				upCmd.Parameters.AddWithValue("$rnk", newRank);
+				upCmd.Parameters.AddWithValue("$mt", newMaxTroops);
+				upCmd.Parameters.AddWithValue("$gain", troopGain);
+				upCmd.Parameters.AddWithValue("$oid", officerId);
+				upCmd.ExecuteNonQuery();
+
+				GD.Print($"[Promotion] {name} reached Rank {targetLevel}: {newRank} (+{troopGain} troops cap)");
+				if (isPlayer) EmitSignal(SignalName.PlayerStatsChanged);
 			}
 		}
 	}
 
-	private int GetRankLevel(string rank) => GameConstants.GetRankLevel(rank);
+	private int GetRankLevel(string rank) => GameConstants.GetLevelByRankName(rank);
 
 	public bool DeclareAttack(int officerId, int cityId)
 	{
@@ -592,6 +578,19 @@ public partial class ActionManager : Node
 			if (reverseCount > 0)
 			{
 				GD.Print($"Cannot declare attack! City {cityId} is already marching on your location ({currentLoc}). You must defend!");
+				return false;
+			}
+
+			// 3c. Friendly Fire Check
+			var ownCmd = conn.CreateCommand();
+			ownCmd.CommandText = "SELECT faction_id FROM cities WHERE city_id = $cid";
+			ownCmd.Parameters.AddWithValue("$cid", cityId);
+			var targetFactionObj = ownCmd.ExecuteScalar();
+			int targetFactionId = (targetFactionObj != null && targetFactionObj != DBNull.Value) ? Convert.ToInt32(targetFactionObj) : 0;
+
+			if (targetFactionId == factionId)
+			{
+				GD.Print($"Cannot attack City {cityId}! It already belongs to your faction ({factionId}).");
 				return false;
 			}
 
@@ -1004,14 +1003,20 @@ public partial class ActionManager : Node
 		{
 			conn.Open();
 
-			// 1. Get Officer Stats
+			// 1. Get Officer Stats including Skills & Gold
 			var cmd = conn.CreateCommand();
-			cmd.CommandText = "SELECT name, leadership, intelligence, strength, politics, charisma, rank, faction_id FROM officers WHERE officer_id = $oid";
+			cmd.CommandText = @"
+				SELECT name, leadership, intelligence, strength, politics, charisma, rank, faction_id, gold, 
+				       farming, business, inventing, fortification, security 
+				FROM officers WHERE officer_id = $oid";
 			cmd.Parameters.AddWithValue("$oid", officerId);
 
 			string name = "Unknown";
 			int lea = 0, intl = 0, str = 0, pol = 0, cha = 50;
 			long factionId = 0;
+			int officerGold = 0;
+			Dictionary<string, int> skills = new Dictionary<string, int>();
+			bool isPlayer = false;
 
 			using (var r = cmd.ExecuteReader())
 			{
@@ -1024,13 +1029,28 @@ public partial class ActionManager : Node
 					pol = r.GetInt32(4);
 					cha = r.IsDBNull(5) ? 50 : r.GetInt32(5);
 					factionId = r.IsDBNull(7) ? 0 : r.GetInt64(7);
+					officerGold = r.GetInt32(8);
+
+					skills["farming"] = r.GetInt32(9);
+					skills["business"] = r.GetInt32(10);
+					skills["inventing"] = r.GetInt32(11);
+					skills["fortification"] = r.GetInt32(12);
+					skills["security"] = r.GetInt32(13);
 				}
 			}
 
-			// 3. Calculate Gain
+			// Check if Player for Base Stat updates
+			var checkPCmd = conn.CreateCommand();
+			checkPCmd.CommandText = "SELECT is_player FROM officers WHERE officer_id = $oid";
+			checkPCmd.Parameters.AddWithValue("$oid", officerId);
+			isPlayer = Convert.ToInt32(checkPCmd.ExecuteScalar()) == 1;
+
+			// 2. Map Action to Stats and Skills
 			int statValue = 0;
 			string targetColumn = "";
 			string actionName = "";
+			string influencingSkill = "";
+			string statColName = "";
 
 			switch (type)
 			{
@@ -1038,30 +1058,85 @@ public partial class ActionManager : Node
 					statValue = pol;
 					targetColumn = "commerce";
 					actionName = "Develop Commerce";
+					influencingSkill = "business";
+					statColName = "politics";
 					break;
 				case DomesticType.Agriculture:
 					statValue = pol;
 					targetColumn = "agriculture";
 					actionName = "Cultivate Land";
+					influencingSkill = "farming";
+					statColName = "politics";
 					break;
 				case DomesticType.Defense:
 					statValue = lea;
 					targetColumn = "defense_level";
 					actionName = "Bolster Defense";
+					influencingSkill = "fortification";
+					statColName = "leadership";
 					break;
 				case DomesticType.PublicOrder:
 					statValue = str;
 					targetColumn = "public_order";
 					actionName = "Patrol";
+					influencingSkill = "security";
+					statColName = "strength";
 					break;
 				case DomesticType.Technology:
 					statValue = intl;
 					targetColumn = "technology";
 					actionName = "Research";
+					influencingSkill = "inventing";
+					statColName = "intelligence";
 					break;
 			}
 
-			// 2. Check for Redundancy (Is it already maxed?)
+			// 3. Treasury vs Personal Cost Logic
+			var cityInfoCmd = conn.CreateCommand();
+			cityInfoCmd.CommandText = @"
+				SELECT c.governor_id, c.faction_id, f.leader_id, f.gold_treasury
+				FROM cities c
+				LEFT JOIN factions f ON c.faction_id = f.faction_id
+				WHERE c.city_id = $cid";
+			cityInfoCmd.Parameters.AddWithValue("$cid", cityId);
+
+			int cityGovId = 0;
+			int cityFactionId = 0;
+			int factionLeaderId = 0;
+			long goldTreasury = 0;
+
+			using (var r = cityInfoCmd.ExecuteReader())
+			{
+				if (r.Read())
+				{
+					cityGovId = r.IsDBNull(0) ? 0 : r.GetInt32(0);
+					cityFactionId = r.IsDBNull(1) ? 0 : r.GetInt32(1);
+					factionLeaderId = r.IsDBNull(2) ? 0 : r.GetInt32(2);
+					goldTreasury = r.IsDBNull(3) ? 0 : r.GetInt64(3);
+				}
+			}
+
+			bool isAssigned = (officerId == cityGovId || officerId == factionLeaderId) && (factionId == cityFactionId);
+			int domesticCost = 100;
+
+			if (isAssigned)
+			{
+				if (goldTreasury < domesticCost)
+				{
+					GD.Print($"[ActionManager] Faction treasury is too low! ({goldTreasury} < {domesticCost})");
+					return;
+				}
+			}
+			else
+			{
+				if (officerGold < domesticCost)
+				{
+					GD.Print($"[ActionManager] Not enough personal gold! ({officerGold} < {domesticCost})");
+					return;
+				}
+			}
+
+			// 4. Check for Redundancy (Is it already maxed?)
 			int currentVal = 0;
 			int maxStats = 1000;
 			var cityCmd = conn.CreateCommand();
@@ -1083,30 +1158,63 @@ public partial class ActionManager : Node
 				return;
 			}
 
-			// 4. Calculate Gain
-			// Formula: Base (Stat/2) + Random(5-15)
-			int gain = (int)(statValue * 0.5f) + new Random().Next(5, 16);
+			// 5. Calculate Gain
+			// Formula: (Stat/2) + (Skill/5) + Random(5-15)
+			int skillValue = skills.ContainsKey(influencingSkill) ? skills[influencingSkill] : 0;
+			int gain = (int)(statValue * 0.5f) + (int)(skillValue * 0.2f) + new Random().Next(5, 16);
 
-			string updateSql = $"UPDATE cities SET {targetColumn} = MIN({cap}, {targetColumn} + {gain}) WHERE city_id = {cityId}";
+			string updateCitySql = $"UPDATE cities SET {targetColumn} = MIN({cap}, {targetColumn} + {gain}) WHERE city_id = {cityId}";
+
+			int meritGain = (gain > (int)(statValue * 0.6f)) ? 20 : 10;
+			int repGain = 10 + (gain / 10);
+
+			// 6. Growth Logic
+			bool statUpped = new Random().Next(1, 11) == 1; // 10% chance for stat gain
+			string statUpdate = statUpped ? $", {statColName} = {statColName} + 1" : "";
+			if (statUpped && isPlayer)
+				statUpdate += $", base_{statColName} = base_{statColName} + 1";
+
+			// Skills always go up by 1 during the action
+			string skillUpdate = $", {influencingSkill} = {influencingSkill} + 1";
 
 			using (var trans = conn.BeginTransaction())
 			{
 				try
 				{
-					ExecuteSql(conn, updateSql);
-					ExecuteSql(conn, $"UPDATE officers SET current_action_points = current_action_points - 1, reputation = reputation + 8, gold = gold + 50, days_service = days_service + 1 WHERE officer_id = {officerId}");
+					ExecuteSql(conn, updateCitySql);
+
+					// Apply costs and gains to officer
+					string paySql = isAssigned ? "" : $", gold = gold - {domesticCost}";
+					ExecuteSql(conn, $@"
+						UPDATE officers 
+						SET current_action_points = current_action_points - 1, 
+						    reputation = reputation + {repGain}, 
+							merit_score = merit_score + {meritGain}, 
+							days_service = days_service + 1
+							{paySql}
+							{statUpdate}
+							{skillUpdate}
+						WHERE officer_id = {officerId}");
+
+					// If assigned, take from treasury
+					if (isAssigned)
+					{
+						ExecuteSql(conn, $"UPDATE factions SET gold_treasury = gold_treasury - {domesticCost} WHERE faction_id = {cityFactionId}");
+					}
 
 					trans.Commit();
-					GD.Print($"{name} performed {actionName} in city {cityId}. Gain: {gain} and +8 Reputation!");
 
-					// DYNAMIC RELATIONSHIP: Officers in this city like the faction more for investing (Prosperity)
+					string growthMsg = statUpped ? $" and your {statColName} increased!" : ".";
+					GD.Print($"{name} performed {actionName} in city {cityId}. Gain: {gain}, +{repGain} Rep, +{meritGain} Merit. Your {influencingSkill} skill improved{growthMsg}");
+
 					if (factionId > 0)
 					{
-						UpdateCityFactionOpinion(conn, cityId, (int)factionId, 1); // Small boost
+						UpdateCityFactionOpinion(conn, cityId, (int)factionId, 1);
 					}
 
 					CheckPromotions(officerId, conn);
-					EmitSignal(nameof(ActionPointsChanged)); // Refresh HUD
+					EmitSignal(nameof(ActionPointsChanged));
+					if (statUpped && isPlayer) EmitSignal(nameof(PlayerStatsChanged));
 				}
 				catch (Exception ex)
 				{
@@ -1547,6 +1655,8 @@ public partial class ActionManager : Node
 						if (uName.Contains("Lancer Cavalry") && tech < 300) meetsTech = false;
 						if (uName.Contains("Heavy Cavalry") && tech < 600) meetsTech = false;
 						if (uName.Contains("Crossbowman") && tech < 400) meetsTech = false;
+						if (uName.Contains("Elite") && tech < 600) meetsTech = false;
+						if (uName.Contains("Siege") && tech < 400) meetsTech = false;
 
 						if (meetsTech)
 						{
@@ -1633,7 +1743,7 @@ public partial class ActionManager : Node
 			rankCmd.CommandText = "SELECT rank FROM officers WHERE officer_id = $oid";
 			rankCmd.Parameters.AddWithValue("$oid", officerId);
 			string rankStr = (string)rankCmd.ExecuteScalar();
-			int rankLevel = GameConstants.GetRankLevel(rankStr);
+			int rankLevel = GameConstants.GetLevelByRankName(rankStr);
 
 			if (rankLevel < 3)
 			{
@@ -1777,8 +1887,126 @@ public partial class ActionManager : Node
 			rankCmd.CommandText = "SELECT rank FROM officers WHERE officer_id = $oid";
 			rankCmd.Parameters.AddWithValue("$oid", officerId);
 			string rank = (string)rankCmd.ExecuteScalar();
-			score += GameConstants.GetRankLevel(rank);
+			score += GameConstants.GetLevelByRankName(rank);
 		}
 		return score;
+	}
+
+	// --- Officer Phase AI ---
+
+	private struct OfficerTurnData
+	{
+		public int Id;
+		public string Name;
+		public int LocId;
+		public int Fid;
+		public string Mission;
+		public int AP;
+		public int MaxAP;
+		public int Satisfaction;
+	}
+
+	public void ProcessAllOfficerTurns()
+	{
+		using (var conn = DatabaseHelper.GetConnection())
+		{
+			conn.Open();
+
+			// 1. Fetch all non-player officers
+			var cmd = conn.CreateCommand();
+			cmd.CommandText = "SELECT officer_id, name, location_id, faction_id, current_mission, current_action_points, max_action_points, satisfaction FROM officers WHERE is_player = 0";
+
+			var officers = new List<OfficerTurnData>();
+			using (var r = cmd.ExecuteReader())
+			{
+				while (r.Read())
+				{
+					officers.Add(new OfficerTurnData
+					{
+						Id = r.GetInt32(0),
+						Name = r.GetString(1),
+						LocId = r.GetInt32(2),
+						Fid = r.IsDBNull(3) ? 0 : r.GetInt32(3),
+						Mission = r.IsDBNull(4) ? null : r.GetString(4),
+						AP = r.GetInt32(5),
+						MaxAP = r.GetInt32(6),
+						Satisfaction = r.IsDBNull(7) ? 100 : r.GetInt32(7)
+					});
+				}
+			}
+
+			// 2. Process each officer
+			foreach (var o in officers)
+			{
+				ProcessSingleOfficerTurn(o, conn);
+			}
+		}
+	}
+
+	private void ProcessSingleOfficerTurn(OfficerTurnData data, SqliteConnection conn)
+	{
+		var rng = new Random();
+		int currentAP = data.AP;
+
+		// 1. Work Duty (If assigned and satisfied)
+		if (!string.IsNullOrEmpty(data.Mission) && data.Satisfaction > 30)
+		{
+			if (currentAP > 0)
+			{
+				PerformWorkMission(data.Id, data.LocId, data.Mission);
+				currentAP--;
+			}
+		}
+
+		// 2. Spend Remaining AP on personal actions
+		while (currentAP > 0)
+		{
+			float roll = (float)rng.NextDouble();
+			if (roll < 0.5f) // Socialize
+			{
+				int targetId = FindRandomOfficerInCity(data.Id, data.LocId, conn);
+				if (targetId > 0)
+				{
+					RelationshipManager.Instance.ModifyRelation(data.Id, targetId, 10);
+					GD.Print($"[OfficerPhase] {data.Name} socialized with {targetId}");
+				}
+			}
+			else if (roll < 0.8f) // Train
+			{
+				string[] stats = { "strength", "leadership", "intelligence", "politics", "charisma" };
+				string targetStat = stats[rng.Next(stats.Length)];
+				ExecuteSql(conn, $"UPDATE officers SET {targetStat} = {targetStat} + 1 WHERE officer_id = {data.Id}");
+				GD.Print($"[OfficerPhase] {data.Name} trained {targetStat}");
+			}
+
+			currentAP--;
+			ExecuteSql(conn, $"UPDATE officers SET current_action_points = {currentAP} WHERE officer_id = {data.Id}");
+		}
+	}
+
+	private void PerformWorkMission(int officerId, int cityId, string mission)
+	{
+		DomesticType type;
+		switch (mission)
+		{
+			case "Commerce": type = DomesticType.Commerce; break;
+			case "Farming": type = DomesticType.Agriculture; break;
+			case "Science": type = DomesticType.Technology; break;
+			case "Defense": type = DomesticType.Defense; break;
+			case "Order": type = DomesticType.PublicOrder; break;
+			default: return;
+		}
+
+		PerformDomesticAction(officerId, cityId, type);
+	}
+
+	private int FindRandomOfficerInCity(int excludeId, int cityId, SqliteConnection conn)
+	{
+		var cmd = conn.CreateCommand();
+		cmd.CommandText = "SELECT officer_id FROM officers WHERE location_id = $cid AND officer_id != $me ORDER BY RANDOM() LIMIT 1";
+		cmd.Parameters.AddWithValue("$cid", cityId);
+		cmd.Parameters.AddWithValue("$me", excludeId);
+		var res = cmd.ExecuteScalar();
+		return res != null ? Convert.ToInt32(res) : 0;
 	}
 }

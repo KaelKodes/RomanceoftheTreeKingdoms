@@ -169,7 +169,9 @@ public partial class UnitController : Node2D
             string officerState = OfficerHP > 0 ? $"[{OfficerHP} HP]" : "[DEFEATED]";
             // Morale Icon/String
             string moraleStr = CurrentMorale > 70 ? "High" : (CurrentMorale < 30 ? "Low" : "Normal");
-            _infoLabel.Text = $"{OfficerData.Name} {officerState}\nTroops: {CurrentHP} | Mor: {moraleStr}";
+
+            string prefix = (Role == UnitRole.Squad) ? "[Squad] " : "";
+            _infoLabel.Text = $"{prefix}{OfficerData.Name} {officerState}\nTroops: {CurrentHP} | Mor: {moraleStr}";
 
             // Color modulation based on side
             if (OfficerData.IsPlayer) _infoLabel.Modulate = Colors.Green;

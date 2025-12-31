@@ -50,6 +50,7 @@ script = ExtResource("6_routeoverlay")
 layout_mode = 1
 anchors_preset = -1
 anchor_top = 0.047839507
+anchor_bottom = 0.047839507
 offset_left = 164.0
 offset_right = 829.0
 offset_bottom = 623.0
@@ -167,7 +168,6 @@ offset_bottom = 648.0
 size_flags_vertical = 0
 
 [node name="OfficerCard" parent="UI_Layer" instance=ExtResource("4_officercard")]
-initial_position = 1
 visible = false
 theme_override_styles/embedded_border = SubResource("StyleBoxEmpty_jsexe")
 theme_override_styles/embedded_unfocused_border = SubResource("StyleBoxEmpty_05f3n")

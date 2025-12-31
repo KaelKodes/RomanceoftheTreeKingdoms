@@ -30,6 +30,47 @@ public partial class BattleManager : Node
 					GD.Print($"TABLE {r.GetString(0)}: {r.GetString(1)}");
 				}
 			}
+
+			// DB Migration: Ensure formation_type column exists
+			var checkCmd = conn.CreateCommand();
+			checkCmd.CommandText = "PRAGMA table_info(officers)";
+			bool hasFormation = false;
+			bool hasMainTroopType = false;
+			bool hasOfficerType = false;
+			using (var r = checkCmd.ExecuteReader())
+			{
+				while (r.Read())
+				{
+					string col = r["name"].ToString();
+					if (col == "formation_type") hasFormation = true;
+					if (col == "main_troop_type") hasMainTroopType = true;
+					if (col == "officer_type") hasOfficerType = true;
+				}
+			}
+
+			if (!hasFormation)
+			{
+				var alterCmd = conn.CreateCommand();
+				alterCmd.CommandText = "ALTER TABLE officers ADD COLUMN formation_type INTEGER DEFAULT 0";
+				alterCmd.ExecuteNonQuery();
+				GD.Print("[BattleManager] Migrated DB: Added formation_type column.");
+			}
+
+			if (!hasMainTroopType)
+			{
+				var alterCmd = conn.CreateCommand();
+				alterCmd.CommandText = "ALTER TABLE officers ADD COLUMN main_troop_type INTEGER DEFAULT 0";
+				alterCmd.ExecuteNonQuery();
+				GD.Print("[BattleManager] Migrated DB: Added main_troop_type column.");
+			}
+
+			if (!hasOfficerType)
+			{
+				var alterCmd = conn.CreateCommand();
+				alterCmd.CommandText = "ALTER TABLE officers ADD COLUMN officer_type INTEGER DEFAULT 0";
+				alterCmd.ExecuteNonQuery();
+				GD.Print("[BattleManager] Migrated DB: Added officer_type column.");
+			}
 		}
 	}
 
@@ -115,7 +156,7 @@ public partial class BattleManager : Node
 			var cmd = conn.CreateCommand();
 			// Get Name, ID, Faction, Stats
 			cmd.CommandText = @"
-				SELECT officer_id, name, faction_id, leadership, intelligence, strength, charisma, is_player, rank, troops
+			SELECT officer_id, name, faction_id, leadership, intelligence, strength, charisma, is_player, rank, troops, formation_type, politics, main_troop_type, officer_type
 				FROM officers 
 				WHERE location_id = $cid";
 			cmd.Parameters.AddWithValue("$cid", cityId);
@@ -133,90 +174,187 @@ public partial class BattleManager : Node
 						Intelligence = reader.GetInt32(4),
 						Strength = reader.GetInt32(5),
 						Charisma = reader.IsDBNull(6) ? 50 : reader.GetInt32(6),
+						Politics = reader.IsDBNull(11) ? 50 : reader.GetInt32(11),
 						IsPlayer = reader.GetBoolean(7),
 						Rank = reader.GetString(8),
 						Troops = reader.IsDBNull(9) ? 0 : reader.GetInt32(9)
 					};
 					bo.MaxTroops = GetMaxTroops(bo.Rank);
-					CurrentContext.AllOfficers.Add(bo);
 
-					if (isAttacker)
+					// Load types from DB if they exist (non-zero)
+					int mtt = reader.IsDBNull(12) ? 0 : reader.GetInt32(12);
+					int oct = reader.IsDBNull(13) ? 0 : reader.GetInt32(13);
+
+					if (mtt > 0) bo.MainTroopType = (TroopType)(mtt - 1); // We store 1-indexed to avoid 0/NULL ambiguity
+					if (oct > 0) bo.OfficerType = (TroopType)(oct - 1);
+
+					if (mtt == 0 || oct == 0)
 					{
-						CurrentContext.AttackerOfficers.Add(bo);
+						AssignIntelligentTroopType(bo);
 					}
-				}
-			}
-		}
+
+					int fType = reader.IsDBNull(10) ? 0 : reader.GetInt32(10);
+					bo.Formation = (FormationShape)fType;
+
+					// Initialize Extended Stats
+					bo.MaxOfficerHP = bo.Strength + bo.Leadership;
+					if (bo.OfficerId == 1) bo.MaxOfficerHP *= 2; // Buff player? Or just keep scaling
+					bo.OfficerHP = bo.MaxOfficerHP;
+					bo.OfficerArmor = bo.Intelligence / 2;
+					bo.TroopArmor = bo.Leadership / 5;
+
+					// Determine Combat Position
+					if (bo.Strength > 70 || bo.MainTroopType == TroopType.Infantry) bo.CombatPosition = "Front";
+					else if (bo.Intelligence > 70 || bo.MainTroopType == TroopType.Archer) bo.CombatPosition = "Rear";
+					else bo.CombatPosition = "Middle";
+
+					// PREVENT DUPLICATES (If officer was already added by a previous fetch, e.g. Remote Logic)
+					if (!CurrentContext.AllOfficers.Any(x => x.OfficerId == bo.OfficerId))
+					{
+						CurrentContext.AllOfficers.Add(bo);
+						// Only add to specific side lists if not already handled by DetermineSides later
+						// Actually DetermineSides clears and rebuilds lists, so we just need uniqueness in AllOfficers.
+						// BUT wait, DetermineSides uses AllOfficers. 
+
+						// The old logic added to AttackerOfficers directly here if isAttacker was true.
+						// We should probably rely on DetermineSides to sort them out based on FactionId.
+						// However, to keep existing logic safe, we can leave the specific add, but guarded.
+					}
+
+					// NOTE: We don't need to manually add to AttackerOfficers/DefenderOfficers here 
+                    // because DetermineSides() is called at the end of CreateContext() which sorts everyone.
+                }
+            }
+        }
 
 
-		// Fetch Remote Attackers (Officers of the attacking faction in ADJACENT cities)
-		if (CurrentContext.AttackerFactionId > 0)
-		{
-			using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
-			{
-				conn.Open();
-				var remoteCmd = conn.CreateCommand();
-				remoteCmd.CommandText = @"
-                    SELECT o.officer_id, o.name, o.faction_id, o.leadership, o.intelligence, o.strength, o.charisma, o.is_player, o.rank, o.troops
+        // Fetch Remote Attackers (Officers of the attacking faction in ADJACENT cities)
+        if (CurrentContext.AttackerFactionId > 0)
+        {
+            using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+            {
+                conn.Open();
+                var remoteCmd = conn.CreateCommand();
+                remoteCmd.CommandText = @"
+                    SELECT o.officer_id, o.name, o.faction_id, o.leadership, o.intelligence, o.strength, o.charisma, o.is_player, o.rank, o.troops, o.politics, o.main_troop_type, o.officer_type
                     FROM officers o
                     JOIN routes r ON (o.location_id = r.start_city_id AND r.end_city_id = $cid) 
                                  OR (o.location_id = r.end_city_id AND r.start_city_id = $cid)
 					WHERE o.faction_id = $afid AND o.location_id != $cid";
-				remoteCmd.Parameters.AddWithValue("$cid", cityId);
-				remoteCmd.Parameters.AddWithValue("$afid", CurrentContext.AttackerFactionId);
+                remoteCmd.Parameters.AddWithValue("$cid", cityId);
+                remoteCmd.Parameters.AddWithValue("$afid", CurrentContext.AttackerFactionId);
 
-				using (var reader = remoteCmd.ExecuteReader())
-				{
-					while (reader.Read())
-					{
-						var bo = new BattleOfficer
-						{
-							OfficerId = reader.GetInt32(0),
-							Name = reader.GetString(1),
-							FactionId = reader.GetInt32(2),
-							Leadership = reader.GetInt32(3),
-							Intelligence = reader.GetInt32(4),
-							Strength = reader.GetInt32(5),
-							Charisma = reader.IsDBNull(6) ? 50 : reader.GetInt32(6),
-							IsPlayer = reader.GetBoolean(7),
-							Rank = reader.GetString(8),
-							Troops = reader.IsDBNull(9) ? 0 : reader.GetInt32(9)
-						};
-						bo.MaxTroops = GetMaxTroops(bo.Rank);
+                using (var reader = remoteCmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        var bo = new BattleOfficer
+                        {
+                            OfficerId = reader.GetInt32(0),
+                            Name = reader.GetString(1),
+                            FactionId = reader.GetInt32(2),
+                            Leadership = reader.GetInt32(3),
+                            Intelligence = reader.GetInt32(4),
+                            Strength = reader.GetInt32(5),
+                            Charisma = reader.IsDBNull(6) ? 50 : reader.GetInt32(6),
+                            Politics = reader.IsDBNull(10) ? 50 : reader.GetInt32(10),
+                            IsPlayer = reader.GetBoolean(7),
+                            Rank = reader.GetString(8),
+                            Troops = reader.IsDBNull(9) ? 0 : reader.GetInt32(9)
+                        };
+                        bo.MaxTroops = GetMaxTroops(bo.Rank);
 
-						// Avoid duplicates if they are somehow already in list
-						if (!CurrentContext.AllOfficers.Any(x => x.OfficerId == bo.OfficerId))
-							CurrentContext.AllOfficers.Add(bo);
-					}
-				}
-			}
-		}
+                        // Load types from DB if they exist
+                        int mtt = reader.IsDBNull(11) ? 0 : reader.GetInt32(11); // politics is 10
+                        int oct = reader.IsDBNull(12) ? 0 : reader.GetInt32(12);
+                        if (mtt > 0) bo.MainTroopType = (TroopType)(mtt - 1);
+                        if (oct > 0) bo.OfficerType = (TroopType)(oct - 1);
+                        if (mtt == 0 || oct == 0) AssignIntelligentTroopType(bo);
 
-		// Generate Militia if Neutral
-		if (CurrentContext.OwnerFactionId == 0)
-		{
-			GD.Print("Generating Militia for Neutral City...");
-			var rng = new Random();
-			int militiaCount = rng.Next(3, 6);
-			for (int i = 0; i < militiaCount; i++)
-			{
-				var militia = new BattleOfficer
-				{
-					OfficerId = -100 - i, // Temp ID
-					Name = "Militia Guard",
-					FactionId = 0, // Neutral
-					Leadership = 30,
-					Intelligence = 10,
-					Strength = 40,
-					Charisma = 10,
-					IsPlayer = false,
-					Rank = "Minion",
-					Troops = 500,
-					MaxTroops = 500
-				};
-				CurrentContext.AllOfficers.Add(militia);
-			}
-		}
+                        // Initialize Extended Stats
+                        bo.MaxOfficerHP = bo.Strength + bo.Leadership;
+                        bo.OfficerHP = bo.MaxOfficerHP;
+                        bo.OfficerArmor = bo.Intelligence / 2;
+                        bo.TroopArmor = bo.Leadership / 5;
+
+                        if (bo.Strength > 70) bo.CombatPosition = "Front";
+                        else if (bo.Intelligence > 70) bo.CombatPosition = "Rear";
+                        else bo.CombatPosition = "Middle";
+
+                        // Avoid duplicates if they are somehow already in list
+                        if (!CurrentContext.AllOfficers.Any(x => x.OfficerId == bo.OfficerId))
+                            CurrentContext.AllOfficers.Add(bo);
+                    }
+                }
+            }
+        }
+
+        // Generate Militia if Neutral
+        if (CurrentContext.OwnerFactionId == 0)
+        {
+            GD.Print("Generating Militia for Neutral City...");
+            var rng = new Random();
+            int militiaCount = rng.Next(3, 6);
+            for (int i = 0; i < militiaCount; i++)
+            {
+                var militia = new BattleOfficer
+                {
+                    OfficerId = -100 - i, // Temp ID
+                    Name = "Militia Guard",
+                    FactionId = 0, // Neutral
+                    Leadership = 30,
+                    Intelligence = 10,
+                    Strength = 40,
+                    Charisma = 10,
+                    Politics = 10,
+                    IsPlayer = false,
+                    Rank = "Minion",
+                    Troops = 500,
+                    MaxTroops = 500,
+                    MainTroopType = TroopType.Infantry,
+                    Formation = FormationShape.Vanguard,
+                    MaxOfficerHP = 70,
+                    OfficerHP = 70,
+                    OfficerArmor = 5,
+                    TroopArmor = 2,
+                    CombatPosition = "Front"
+                };
+                CurrentContext.AllOfficers.Add(militia);
+            }
+        }
+    }
+
+    private static readonly Random _battleRng = new Random();
+
+    private void AssignIntelligentTroopType(BattleOfficer bo)
+    {
+        // Weights for RPS units (Infantry, Archer, Cavalry)
+        int infWeight = 40;
+        int arcWeight = 25;
+        int cavWeight = 25;
+        int siegeWeight = 5;
+        int eliteWeight = 5;
+
+        // Stat modifiers: High stats make an officer MORE LIKELY to be given that unit
+		// but it's not guaranteed. This maintains the RPS dynamic across the army.
+		if (bo.Intelligence > 70) arcWeight += 50;
+		if (bo.Strength > 70) cavWeight += 50;
+		if (bo.Leadership > 80) eliteWeight += 30;
+		if (bo.Intelligence > 50 && bo.Politics > 50) siegeWeight += 20;
+
+		int totalWeight = infWeight + arcWeight + cavWeight + siegeWeight + eliteWeight;
+		int roll = _battleRng.Next(totalWeight);
+
+		if (roll < infWeight) bo.MainTroopType = TroopType.Infantry;
+		else if (roll < infWeight + arcWeight) bo.MainTroopType = TroopType.Archer;
+		else if (roll < infWeight + arcWeight + cavWeight) bo.MainTroopType = TroopType.Cavalry;
+		else if (roll < infWeight + arcWeight + cavWeight + siegeWeight) bo.MainTroopType = TroopType.Siege;
+		else bo.MainTroopType = TroopType.Elite;
+
+		// Officer Preference: Can be different from troops!
+		if (bo.Intelligence > bo.Strength + 20) bo.OfficerType = TroopType.Archer;
+		else if (bo.Strength > bo.Intelligence + 20) bo.OfficerType = TroopType.Cavalry;
+		else bo.OfficerType = TroopType.Infantry;
 	}
 
 	public int GetMaxTroops(string rank)
@@ -289,6 +427,9 @@ public partial class BattleManager : Node
 		foreach (var r in ronin)
 		{
 			// user says "very rare". 5% chance to even consider joining.
+			// EXCEPTION: Player is never skipped or auto-assigned by this logic. They choose in UI.
+			if (r.IsPlayer) continue;
+
 			if (rng.NextDouble() > 0.05)
 			{
 				GD.Print($"[Battle] Ronin {r.Name} stays neutral (Very Rare Join Check).");
@@ -607,7 +748,15 @@ public partial class BattleManager : Node
 				HandlePostBattleConsequences(defenderFaction, cityId, attackerFaction);
 			}
 
+			// Clean up Context if it matches the simulated battle
+			if (CurrentContext != null && CurrentContext.LocationId == cityId)
+			{
+				CurrentContext = null;
+			}
 
+			// Resume Turn Cycle
+			var turnMgr = GetNodeOrNull<TurnManager>("/root/TurnManager");
+			turnMgr?.ResumeConflictResolution(cityId);
 		}
 	}
 
@@ -781,7 +930,7 @@ public partial class BattleManager : Node
 		var potentialNewGovs = winners
 			.OrderByDescending(o => o.OfficerId == factionLeaderId ? -10 : 0) // Avoid leader as governor
 			.OrderByDescending(o => GetRankLevel(o.Rank))
-			.ThenByDescending(o => o.Charisma)
+			.ThenByDescending(o => o.Politics)
 			.ToList();
 
 		int newGovernorId = -1;
@@ -869,9 +1018,27 @@ public partial class BattleManager : Node
 	public void HandleSurrender(int factionId, int cityId, int winnerFactionId)
 	{
 		GD.Print($"Faction {factionId} SURRENDERS to Faction {winnerFactionId}!");
-		// Soft defeat: absorbed into the winning faction
-		// TODO: Implement absorption logic (change all officer faction_ids)
 		HandlePostBattleConsequences(factionId, cityId, winnerFactionId);
+	}
+
+	public string GetFactionName(int factionId)
+	{
+		if (factionId <= 0) return "Neutral";
+
+		using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+		{
+			conn.Open();
+			var cmd = conn.CreateCommand();
+			cmd.CommandText = "SELECT name FROM factions WHERE faction_id = $id";
+			cmd.Parameters.AddWithValue("$id", factionId);
+			var result = cmd.ExecuteScalar();
+
+			if (result != null && result != DBNull.Value)
+			{
+				return result.ToString();
+			}
+		}
+		return $"Faction {factionId}";
 	}
 }
 
@@ -908,10 +1075,22 @@ public class BattleOfficer
 	public int Intelligence;
 	public int Strength;
 	public int Charisma;
+	public int Politics;
 	public bool IsPlayer;
 	public string Rank;
 	public int Troops;
 	public int MaxTroops;
+	public TroopType MainTroopType;
+	public FormationShape Formation;
+
+	// Real-Time Stats
+	public int OfficerHP;
+	public int MaxOfficerHP;
+	public int OfficerArmor;
+	public int TroopArmor;
+	public string CombatPosition = "Middle"; // Front, Middle, Rear
+	public int Morale = 80; // 0-100
+	public TroopType OfficerType; // Infantry, Archer, Cavalry
 }
 
 public class BattleObjective

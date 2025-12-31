@@ -117,6 +117,13 @@ public partial class ActionManager : Node
 		using (var conn = DatabaseHelper.GetConnection())
 		{
 			conn.Open();
+			// 0. Proximity Check
+			var locCmd = conn.CreateCommand();
+			locCmd.CommandText = "SELECT (o1.location_id = o2.location_id) FROM officers o1, officers o2 WHERE o1.officer_id = $pid AND o2.officer_id = $tid";
+			locCmd.Parameters.AddWithValue("$pid", playerId);
+			locCmd.Parameters.AddWithValue("$tid", targetOfficerId);
+			if ((long)locCmd.ExecuteScalar() == 0) { GD.Print("You must be in the same city to talk!"); return; }
+
 			// 1. Deduct AP
 			var cmd = conn.CreateCommand();
 			cmd.CommandText = "UPDATE officers SET current_action_points = current_action_points - 1 WHERE officer_id = $pid";
@@ -161,6 +168,13 @@ public partial class ActionManager : Node
 				GD.Print($"Not enough Gold! Need {cost}, have {currentGold}.");
 				return;
 			}
+
+			// 0. Proximity Check
+			var locCmd = conn.CreateCommand();
+			locCmd.CommandText = "SELECT (o1.location_id = o2.location_id) FROM officers o1, officers o2 WHERE o1.officer_id = $pid AND o2.officer_id = $tid";
+			locCmd.Parameters.AddWithValue("$pid", playerId);
+			locCmd.Parameters.AddWithValue("$tid", targetOfficerId);
+			if ((long)locCmd.ExecuteScalar() == 0) { GD.Print("You must be in the same city to wine and dine!"); return; }
 
 			// 3. Execute
 			using (var trans = conn.BeginTransaction())
@@ -567,6 +581,20 @@ public partial class ActionManager : Node
 				return false;
 			}
 
+			// 3b. Reverse Conflict Check (Prevent A <-> B Loops)
+			// If Target is already attacking My Location, I cannot attack them back (I must defend)
+			var revCmd = conn.CreateCommand();
+			revCmd.CommandText = "SELECT COUNT(*) FROM pending_battles WHERE location_id = $myLoc AND source_location_id = $targetLoc";
+			revCmd.Parameters.AddWithValue("$myLoc", currentLoc);
+			revCmd.Parameters.AddWithValue("$targetLoc", cityId);
+			long reverseCount = (long)revCmd.ExecuteScalar();
+
+			if (reverseCount > 0)
+			{
+				GD.Print($"Cannot declare attack! City {cityId} is already marching on your location ({currentLoc}). You must defend!");
+				return false;
+			}
+
 			// 4. Deduct AP and Declare
 			// Update pending_battles schema if needed (HOTFIX MIGRATION)
 			try
@@ -895,19 +923,29 @@ public partial class ActionManager : Node
 		{
 			conn.Open();
 
-			// 1. Get Target Faction
+			// 1. Get Target Faction & Location
 			var cmd = conn.CreateCommand();
-			cmd.CommandText = "SELECT faction_id, name FROM officers WHERE officer_id = $tid";
+			cmd.CommandText = "SELECT faction_id, name, location_id FROM officers WHERE officer_id = $tid";
 			cmd.Parameters.AddWithValue("$tid", targetOfficerId);
 			long targetFactionId = 0;
 			string targetName = "";
+			int targetLoc = 0;
 			using (var r = cmd.ExecuteReader())
 			{
 				if (r.Read())
 				{
 					targetFactionId = r.IsDBNull(0) ? 0 : r.GetInt64(0);
 					targetName = r.GetString(1);
+					targetLoc = r.GetInt32(2);
 				}
+			}
+
+			// Proximity Check
+			int playerLoc = (int)GetPlayerLocation(playerId);
+			if (playerLoc != targetLoc)
+			{
+				GD.Print("You must be in the same city to request to join a faction!");
+				return;
 			}
 
 			if (targetFactionId == 0)
@@ -1012,34 +1050,44 @@ public partial class ActionManager : Node
 					actionName = "Bolster Defense";
 					break;
 				case DomesticType.PublicOrder:
-					statValue = str; // RotTK8 uses Strength for Order (Martial Law)
+					statValue = str;
 					targetColumn = "public_order";
 					actionName = "Patrol";
 					break;
 				case DomesticType.Technology:
-					statValue = intl; // RotTK8 uses Intelligence for Tech
+					statValue = intl;
 					targetColumn = "technology";
 					actionName = "Research";
 					break;
 			}
 
+			// 2. Check for Redundancy (Is it already maxed?)
+			int currentVal = 0;
+			int maxStats = 1000;
+			var cityCmd = conn.CreateCommand();
+			cityCmd.CommandText = $"SELECT {targetColumn}, max_stats FROM cities WHERE city_id = $cid";
+			cityCmd.Parameters.AddWithValue("$cid", cityId);
+			using (var reader = cityCmd.ExecuteReader())
+			{
+				if (reader.Read())
+				{
+					currentVal = reader.GetInt32(0);
+					maxStats = reader.IsDBNull(1) ? 1000 : reader.GetInt32(1);
+				}
+			}
+
+			int cap = (type == DomesticType.PublicOrder) ? 100 : maxStats;
+			if (currentVal >= cap)
+			{
+				GD.Print($"[ActionManager] {actionName} cancelled: {targetColumn} is already at its full potential ({currentVal}/{cap})!");
+				return;
+			}
+
+			// 4. Calculate Gain
 			// Formula: Base (Stat/2) + Random(5-15)
-			// Example: 90 Pol -> 45 + 10 = 55 gain
 			int gain = (int)(statValue * 0.5f) + new Random().Next(5, 16);
 
-			// Get max stats
-			int maxStats = 1000;
-			var maxCmd = conn.CreateCommand();
-			maxCmd.CommandText = "SELECT max_stats FROM cities WHERE city_id = $cid";
-			maxCmd.Parameters.AddWithValue("$cid", cityId);
-			var maxRes = maxCmd.ExecuteScalar();
-			if (maxRes != null) maxStats = Convert.ToInt32(maxRes);
-
-			string updateSql = $"UPDATE cities SET {targetColumn} = MIN({maxStats}, {targetColumn} + {gain}) WHERE city_id = {cityId}";
-			if (type == DomesticType.PublicOrder)
-			{
-				updateSql = $"UPDATE cities SET public_order = MIN(100, public_order + {gain}) WHERE city_id = {cityId}";
-			}
+			string updateSql = $"UPDATE cities SET {targetColumn} = MIN({cap}, {targetColumn} + {gain}) WHERE city_id = {cityId}";
 
 			using (var trans = conn.BeginTransaction())
 			{
@@ -1150,11 +1198,12 @@ public partial class ActionManager : Node
 
 			// 1. Get Trainee Info
 			var tCmd = conn.CreateCommand();
-			tCmd.CommandText = $"SELECT {sLow}, gold, name FROM officers WHERE officer_id = $oid";
+			tCmd.CommandText = $"SELECT {sLow}, gold, name, location_id FROM officers WHERE officer_id = $oid";
 			tCmd.Parameters.AddWithValue("$oid", officerId);
 			int tStat = 0;
 			int tGold = 0;
 			string tName = "";
+			int tLoc = 0;
 			using (var r = tCmd.ExecuteReader())
 			{
 				if (r.Read())
@@ -1162,22 +1211,41 @@ public partial class ActionManager : Node
 					tStat = r.GetInt32(0);
 					tGold = r.GetInt32(1);
 					tName = r.GetString(2);
+					tLoc = r.GetInt32(3);
 				}
 			}
 
 			// 2. Validate Mentor
 			var mCmd = conn.CreateCommand();
-			mCmd.CommandText = $"SELECT {sLow}, name FROM officers WHERE officer_id = $mid";
+			mCmd.CommandText = $"SELECT {sLow}, name, location_id, last_mentored_day FROM officers WHERE officer_id = $mid";
 			mCmd.Parameters.AddWithValue("$mid", mentorId);
 			int mStat = 0;
 			string mName = "";
+			int mLoc = 0;
+			int mLastMentored = 0;
 			using (var r = mCmd.ExecuteReader())
 			{
 				if (r.Read())
 				{
 					mStat = r.GetInt32(0);
 					mName = r.GetString(1);
+					mLoc = r.GetInt32(2);
+					mLastMentored = r.IsDBNull(3) ? 0 : r.GetInt32(3);
 				}
+			}
+
+			if (mLoc != tLoc)
+			{
+				GD.Print("Mentor is not in this city!");
+				return;
+			}
+
+			// Daily Limit check
+			int currentDay = GetCurrentDay(conn);
+			if (mLastMentored >= currentDay)
+			{
+				GD.Print($"{mName} is already exhausted from mentoring today!");
+				return;
 			}
 
 			if (mStat <= tStat)
@@ -1225,6 +1293,9 @@ public partial class ActionManager : Node
                             gold = gold - {finalCost}
 						WHERE officer_id = {officerId}");
 
+					// Mark Mentor as used today
+					ExecuteSql(conn, $"UPDATE officers SET last_mentored_day = {currentDay} WHERE officer_id = {mentorId}");
+
 					// Pay the mentor? Or does it go to the 'void'? 
 					// Let's give the mentor a small cut (half) to simulate economy, or just void for now to check inflation.
 					// User didn't specify, void is safer for now.
@@ -1248,14 +1319,15 @@ public partial class ActionManager : Node
 		}
 	}
 
-	public List<(int OfficerId, string Name, int StatValue, int Cost, int Relation)> GetPotentialMentors(int traineeId, string statName)
+	public List<(int OfficerId, string Name, int StatValue, int Cost, int Relation, bool IsAvailable)> GetPotentialMentors(int traineeId, string statName)
 	{
-		var list = new List<(int, string, int, int, int)>();
+		var list = new List<(int, string, int, int, int, bool)>();
 		string sLow = statName.ToLower();
 
 		using (var conn = DatabaseHelper.GetConnection())
 		{
 			conn.Open();
+			int currentDay = GetCurrentDay(conn);
 
 			// 1. Get Trainee Info
 			var tCmd = conn.CreateCommand();
@@ -1274,7 +1346,7 @@ public partial class ActionManager : Node
 
 			// 2. Find Mentors
 			var mCmd = conn.CreateCommand();
-			mCmd.CommandText = $"SELECT officer_id, name, {sLow} FROM officers WHERE location_id = $loc AND {sLow} > $tStat AND officer_id != $oid";
+			mCmd.CommandText = $"SELECT officer_id, name, {sLow}, last_mentored_day FROM officers WHERE location_id = $loc AND {sLow} > $tStat AND officer_id != $oid";
 			mCmd.Parameters.AddWithValue("$loc", locId);
 			mCmd.Parameters.AddWithValue("$tStat", tStat);
 			mCmd.Parameters.AddWithValue("$oid", traineeId);
@@ -1286,17 +1358,26 @@ public partial class ActionManager : Node
 					int mId = r.GetInt32(0);
 					string name = r.GetString(1);
 					int mStat = r.GetInt32(2);
+					int mLastDay = r.IsDBNull(3) ? 0 : r.GetInt32(3);
 
 					int relation = RelationshipManager.Instance.GetRelation(traineeId, mId);
 					int baseCost = GetTrainingCost(tStat); // Cost based on STUDENT level
 					float multiplier = 1.0f - ((relation - 50.0f) / 200.0f);
 					int cost = (int)(baseCost * multiplier);
 
-					list.Add((mId, name, mStat, cost, relation));
+					bool isAvailable = (mLastDay < currentDay);
+					list.Add((mId, name, mStat, cost, relation, isAvailable));
 				}
 			}
 		}
 		return list;
+	}
+
+	private int GetCurrentDay(SqliteConnection conn)
+	{
+		var cmd = conn.CreateCommand();
+		cmd.CommandText = "SELECT current_day FROM game_state LIMIT 1";
+		return Convert.ToInt32(cmd.ExecuteScalar());
 	}
 
 	private int GetTrainingCost(int currentStat)

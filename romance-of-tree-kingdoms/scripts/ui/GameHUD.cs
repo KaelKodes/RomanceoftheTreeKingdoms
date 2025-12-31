@@ -45,12 +45,12 @@ public partial class GameHUD : Control
 		_recordLabel = GetNodeOrNull<Label>("MarginContainer/VBoxContainer/RecordLabel");
 
 		// Stat Allocation UI
-		_strSpin = GetNode<SpinBox>("PlayerHud/PlayerStats/STRSpinBox");
-		_leaSpin = GetNode<SpinBox>("PlayerHud/PlayerStats/LEASpinBox");
-		_intSpin = GetNode<SpinBox>("PlayerHud/PlayerStats/INTSpinBox");
-		_polSpin = GetNode<SpinBox>("PlayerHud/PlayerStats/POLSpinBox");
-		_chaSpin = GetNode<SpinBox>("PlayerHud/PlayerStats/CHASpinBox");
-		_availableLabel = GetNode<Label>("RankUpContainer/AVAILABLELabel");
+		_strSpin = GetNode<SpinBox>("PlayerHud/HBoxContainer/PlayerStats/STRSpinBox");
+		_leaSpin = GetNode<SpinBox>("PlayerHud/HBoxContainer/PlayerStats/LEASpinBox");
+		_intSpin = GetNode<SpinBox>("PlayerHud/HBoxContainer/PlayerStats/INTSpinBox");
+		_polSpin = GetNode<SpinBox>("PlayerHud/HBoxContainer/PlayerStats/POLSpinBox");
+		_chaSpin = GetNode<SpinBox>("PlayerHud/HBoxContainer/PlayerStats/CHASpinBox");
+		_availableLabel = GetNode<Label>("PlayerHud/HBoxContainer/RankUpContainer/AVAILABLELabel");
 
 		_strSpin.ValueChanged += (val) => OnStatChanged(val, "strength");
 		_leaSpin.ValueChanged += (val) => OnStatChanged(val, "leadership");
@@ -62,18 +62,18 @@ public partial class GameHUD : Control
 		// Ideally we use [Export] but since we are hardcoding paths based on user preference:
 		_endTurnButton = GetNode<Button>("MarginContainer/VBoxContainer/EndDayButton");
 
-		_rankUpLabel = GetNode<Label>("RankUpContainer/RankUpLabel");
-		_submitButton = GetNode<Button>("RankUpContainer/SubmitButton");
+		_rankUpLabel = GetNode<Label>("PlayerHud/HBoxContainer/RankUpContainer/RankUpLabel");
+		_submitButton = GetNode<Button>("PlayerHud/HBoxContainer/RankUpContainer/SubmitButton");
 		_submitButton.Pressed += OnSubmitPressed;
 		_submitButton.Hide();
 		_rankUpLabel.Hide();
 
 		// Track labels for highlighting
-		_statLabels["strength"] = GetNode<Label>("PlayerHud/PlayerStats/Label");
-		_statLabels["leadership"] = GetNode<Label>("PlayerHud/PlayerStats/Label2");
-		_statLabels["intelligence"] = GetNode<Label>("PlayerHud/PlayerStats/Label3");
-		_statLabels["politics"] = GetNodeOrNull<Label>("PlayerHud/PlayerStats/Label4"); // May be missing in user diff
-		_statLabels["charisma"] = GetNode<Label>("PlayerHud/PlayerStats/Label5");
+		_statLabels["strength"] = GetNode<Label>("PlayerHud/HBoxContainer/PlayerStats/Label");
+		_statLabels["leadership"] = GetNode<Label>("PlayerHud/HBoxContainer/PlayerStats/Label2");
+		_statLabels["intelligence"] = GetNode<Label>("PlayerHud/HBoxContainer/PlayerStats/Label3");
+		_statLabels["politics"] = GetNodeOrNull<Label>("PlayerHud/HBoxContainer/PlayerStats/Label4"); // May be missing in user diff
+		_statLabels["charisma"] = GetNode<Label>("PlayerHud/HBoxContainer/PlayerStats/Label5");
 
 		RefreshHUD();
 

@@ -5,8 +5,12 @@ using System.Linq;
 
 public partial class BattleController : Node2D
 {
+	public static BattleController Instance { get; private set; }
+
 	private BattleManager _battleManager;
 	private BattleGrid _grid;
+
+	public UnitController SelectedUnit => _selectedUnit;
 
 	private List<UnitController> _units = new List<UnitController>();
 	private List<ControlPoint> _controlPoints = new List<ControlPoint>();
@@ -23,6 +27,7 @@ public partial class BattleController : Node2D
 
 	public override void _Ready()
 	{
+		Instance = this;
 		_battleManager = GetNodeOrNull<BattleManager>("/root/BattleManager");
 		_grid = GetNodeOrNull<BattleGrid>("BattleGrid");
 		_unitScene = GD.Load<PackedScene>("res://scenes/Unit.tscn");
@@ -37,6 +42,10 @@ public partial class BattleController : Node2D
 		var hud = new BattleHUD();
 		AddChild(hud);
 		hud.Init(this);
+
+		// Initialize Environment Layer
+		var pm = new ProjectileManager();
+		AddChild(pm);
 
 		StartBattle();
 	}
@@ -321,23 +330,43 @@ public partial class BattleController : Node2D
 			int x = center.X + rng.Next(-2, 3);
 			int y = center.Y + rng.Next(-2, 3);
 			Vector2I candidate = new Vector2I(x, y);
-			if (_grid.IsWalkable(candidate)) return candidate;
+			if (_grid.IsWalkable(candidate) && !_units.Any(u => u.GridPosition == candidate)) return candidate;
 		}
 		return center; // Fallback
 	}
 
 	private void SpawnUnit(BattleOfficer officer, Vector2I gridPos, bool isDefender, bool isAlly)
 	{
-		var unitNode = _unitScene.Instantiate<UnitController>();
-		AddChild(unitNode);
-		unitNode.Initialize(officer, isDefender, isAlly);
-		unitNode.SetGridPosition(gridPos, _grid.GridToWorld(gridPos)); // Initialize Pos
+		// 1. Spawn Officer (Hero)
+		var officerUnit = _unitScene.Instantiate<UnitController>();
+		AddChild(officerUnit);
+		officerUnit.Initialize(officer, isDefender, isAlly, UnitController.UnitRole.Officer, null);
+		officerUnit.SetGridPosition(gridPos, _grid.GridToWorld(gridPos));
+		officerUnit.SetSquadStats(1); // Officer is 1 hero unit
+		_units.Add(officerUnit);
 
+		// 2. Spawn Squads (Troops)
+		int totalTroops = officer.Troops;
+		if (totalTroops <= 0) return;
 
+		// 1 Squad per 150 troops, Max 6
+		int squadCount = Math.Clamp(totalTroops / 150, 1, 6);
+		int troopsPerSquad = totalTroops / squadCount;
 
-		_units.Add(unitNode);
+		var rng = new Random();
+		for (int i = 0; i < squadCount; i++)
+		{
+			// Find spot near Officer
+			Vector2I squadPos = GetRandomSpawnPos(gridPos, rng);
 
-		_units.Add(unitNode);
+			var squadUnit = _unitScene.Instantiate<UnitController>();
+			AddChild(squadUnit);
+			squadUnit.Initialize(officer, isDefender, isAlly, UnitController.UnitRole.Squad, officerUnit);
+			squadUnit.SetGridPosition(squadPos, _grid.GridToWorld(squadPos));
+			squadUnit.SetSquadStats(troopsPerSquad);
+
+			_units.Add(squadUnit);
+		}
 	}
 
 	private void HandleCPCapture(UnitController unit, ControlPoint cp)
@@ -437,7 +466,7 @@ public partial class BattleController : Node2D
 			if (cp.OwnerFactionId != winnerFaction)
 			{
 				// Valid Capture
-				cp.SetOwner(winnerFaction);
+				cp.Capture(winnerFaction); // Use new method with visuals
 				GD.Print($"Faction {winnerFaction} took control of {cp.Type} (Strength: {winnerCount})");
 
 				// Find a representative unit for the dialogue logic

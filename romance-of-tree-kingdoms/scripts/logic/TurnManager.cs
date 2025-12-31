@@ -18,6 +18,8 @@ public partial class TurnManager : Node
 	private int _currentTurnIndex = -1;
 	private bool _isTurnActive = false;
 
+	public bool IsPlayerTurnActive => _isTurnActive;
+
 	// Conflict Queue: (LocationId, AttackerFactionId, SourceLocationId)
 	private Queue<(int cityId, int attackerFactionId, int sourceCityId)> _conflictQueue = new Queue<(int, int, int)>();
 
@@ -30,71 +32,71 @@ public partial class TurnManager : Node
 	// Called by ActionManager.EndDay or directly from UI "End Turn" button
 	// But wait, user ends *their* turn. System ends *Day*.
 	// Let's separate it. 
-    // StartTurnCycle() -> logic -> EndTurn() -> Next...
+	// StartTurnCycle() -> logic -> EndTurn() -> Next...
 
-    public void EnsureTurnSystemStarted()
-    {
-        if (_turnQueue.Count == 0)
-        {
-            GD.Print("Turn System Not Started. Initializing...");
-            StartNewDay();
-        }
-    }
+	public void EnsureTurnSystemStarted()
+	{
+		if (_turnQueue.Count == 0)
+		{
+			GD.Print("Turn System Not Started. Initializing...");
+			StartNewDay();
+		}
+	}
 
-    public void StartNewDay()
-    {
-        int currentDay = GetCurrentDay();
+	public void StartNewDay()
+	{
+		int currentDay = GetCurrentDay();
 
-        // If Day 1 or (Day-1) % 7 == 0 (Weeks start on 1, 8, 15), Re-roll Initiative
-        if (currentDay == 1 || (currentDay - 1) % 7 == 0)
-        {
-            RollInitiative();
-            EmitSignal(SignalName.NewWeekStarted);
+		// If Day 1 or (Day-1) % 7 == 0 (Weeks start on 1, 8, 15), Re-roll Initiative
+		if (currentDay == 1 || (currentDay - 1) % 7 == 0)
+		{
+			RollInitiative();
+			EmitSignal(SignalName.NewWeekStarted);
 
-            // AI Strategic Refresh & Repositioning
-            var ai = GetNode<FactionAI>("/root/FactionAI");
-            using (var conn = DatabaseHelper.GetConnection())
-            {
-                conn.Open();
-                var cmd = conn.CreateCommand();
-                cmd.CommandText = "SELECT faction_id FROM factions";
-                var fids = new List<int>();
-                using (var r = cmd.ExecuteReader())
-                {
-                    while (r.Read()) fids.Add(r.GetInt32(0));
-                }
+			// AI Strategic Refresh & Repositioning
+			var ai = GetNode<FactionAI>("/root/FactionAI");
+			using (var conn = DatabaseHelper.GetConnection())
+			{
+				conn.Open();
+				var cmd = conn.CreateCommand();
+				cmd.CommandText = "SELECT faction_id FROM factions";
+				var fids = new List<int>();
+				using (var r = cmd.ExecuteReader())
+				{
+					while (r.Read()) fids.Add(r.GetInt32(0));
+				}
 
-                // Monthly Cycle (approx 4 weeks)
-                if (currentDay == 1 || (currentDay - 1) % 28 == 0)
-                {
-                    GD.Print("[TurnManager] NEW MONTH! Refreshing Strategic Goals...");
-                    foreach (int fid in fids) ai.UpdateMonthlyGoal(conn, fid);
-                }
+				// Monthly Cycle (approx 4 weeks)
+				if (currentDay == 1 || (currentDay - 1) % 28 == 0)
+				{
+					GD.Print("[TurnManager] NEW MONTH! Refreshing Strategic Goals...");
+					foreach (int fid in fids) ai.UpdateMonthlyGoal(conn, fid);
+				}
 
-                GD.Print("[TurnManager] NEW WEEK! Refreshing Weekly Tasks & Repositioning...");
-                foreach (int fid in fids)
-                {
-                    ai.UpdateWeeklyTask(conn, fid);
-                    ai.RepositionOfficers(conn, fid);
-                }
-            }
-        }
+				GD.Print("[TurnManager] NEW WEEK! Refreshing Weekly Tasks & Repositioning...");
+				foreach (int fid in fids)
+				{
+					ai.UpdateWeeklyTask(conn, fid);
+					ai.RepositionOfficers(conn, fid);
+				}
+			}
+		}
 
-        _currentTurnIndex = -1;
-        AdvanceTurn();
-    }
+		_currentTurnIndex = -1;
+		AdvanceTurn();
+	}
 
-    private void RollInitiative()
-    {
-        _turnQueue.Clear();
-        var factionScores = new Dictionary<int, float>();
-        var rng = new Random();
+	private void RollInitiative()
+	{
+		_turnQueue.Clear();
+		var factionScores = new Dictionary<int, float>();
+		var rng = new Random();
 
-        using (var conn = DatabaseHelper.GetConnection())
-        {
-            conn.Open();
-            var cmd = conn.CreateCommand();
-            // Get Faction Leaders and their stats
+		using (var conn = DatabaseHelper.GetConnection())
+		{
+			conn.Open();
+			var cmd = conn.CreateCommand();
+			// Get Faction Leaders and their stats
 			// Assuming Highest Rank or specific 'is_commander' flag. 
 			// For now, let's grab the officer with MAX(strategy) in the faction as the "Brain"
 			cmd.CommandText = @"
@@ -343,17 +345,34 @@ public partial class TurnManager : Node
 
 		// Check if player is involved
 		var bm = GetNode<BattleManager>("/root/BattleManager");
-		bm.CreateContext(cityId, sourceCityId); // Prepare context
-
-		bool playerInvolved = bm.CurrentContext.AttackerOfficers.Any(o => o.IsPlayer) ||
-							  bm.CurrentContext.DefenderOfficers.Any(o => o.IsPlayer);
+		bm.CreateContext(cityId, sourceCityId);         // Check if player is involved (Anywhere in the city)
+		bool playerInvolved = bm.CurrentContext.AllOfficers.Any(o => o.IsPlayer);
 
 		if (playerInvolved)
 		{
 			GD.Print("Player involved in conflict! Loading Battle Scene...");
-			// Load Scene (Wait for callback)
-			var scene = GD.Load<PackedScene>("res://scenes/BattleSetupUI.tscn");
-			GetTree().Root.AddChild(scene.Instantiate());
+
+			// Close WorldMap Menus to prevent overlap
+			var worldMap = GetTree().Root.FindChild("WorldMap", true, false) as WorldMap;
+			if (IsInstanceValid(worldMap))
+			{
+				worldMap.CityMenuDialog?.Hide();
+				worldMap.OfficerCardDialog?.Hide();
+			}
+
+			// Try to find existing BattleSetupUI (e.g. permanent one in WorldMap)
+			var existingUI = GetTree().Root.FindChild("BattleSetupUI", true, false) as BattleSetupUI;
+			if (IsInstanceValid(existingUI))
+			{
+				GD.Print("Found existing BattleSetupUI. Opening...");
+				existingUI.Open();
+			}
+			else
+			{
+				GD.Print("No existing BattleSetupUI found. Instantiating new one...");
+				var scene = GD.Load<PackedScene>("res://scenes/BattleSetupUI.tscn");
+				GetTree().Root.AddChild(scene.Instantiate());
+			}
 			// Note: BattleSetupUI usually loads Map immediately. 
 			// We need to ensure when Battle ends, it calls ResumeConflictResolution.
 		}

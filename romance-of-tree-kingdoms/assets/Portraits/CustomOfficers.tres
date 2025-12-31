@@ -1,11 +1,13 @@
-[gd_resource type="TileSet" load_steps=14 format=3 uid="uid://c2g3xfs20ysot"]
+[gd_resource type="TileSet" load_steps=18 format=3 uid="uid://c2g3xfs20ysot"]
 
 [ext_resource type="Texture2D" uid="uid://2ua87kj581f0" path="res://assets/Portraits/CustomOfficers.png" id="1_mhl8d"]
 [ext_resource type="Texture2D" uid="uid://cyfjk0uxx4qrc" path="res://assets/Portraits/Females.png" id="2_0qv4y"]
 [ext_resource type="Texture2D" uid="uid://bfqb20gfufaxj" path="res://assets/Portraits/OtherOfficers.png" id="3_6p1ai"]
+[ext_resource type="Texture2D" uid="uid://c5y3mspoea8qa" path="res://assets/Portraits/MoreOfficers1.png" id="3_muuon"]
 [ext_resource type="Texture2D" uid="uid://qbho8linqq7t" path="res://assets/Portraits/ShuOfficers.png" id="4_muuon"]
 [ext_resource type="Texture2D" uid="uid://4g64kowx8ga7" path="res://assets/Portraits/Wei Officers.png" id="5_d4q2g"]
 [ext_resource type="Texture2D" uid="uid://dsyvx43yoksu8" path="res://assets/Portraits/WuOfficers.png" id="6_ouagn"]
+[ext_resource type="Texture2D" uid="uid://cehmbtbal12lh" path="res://assets/Portraits/MoreOfficers2.png" id="8_d4q2g"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_oqqlj"]
 resource_name = "Custom"
@@ -42,6 +44,22 @@ texture_region_size = Vector2i(170, 209)
 3:1/0 = 0
 0:2/0 = 0
 1:2/0 = 0
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_ouagn"]
+resource_name = "More1"
+texture = ExtResource("3_muuon")
+margins = Vector2i(13, 10)
+separation = Vector2i(19, 50)
+texture_region_size = Vector2i(320, 350)
+0:0/0 = 0
+1:0/0 = 0
+2:0/0 = 0
+0:1/0 = 0
+1:1/0 = 0
+2:1/0 = 0
+0:2/0 = 0
+1:2/0 = 0
+2:2/0 = 0
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_0w0vq"]
 resource_name = "Other1"
@@ -100,6 +118,17 @@ texture_region_size = Vector2i(169, 209)
 0:1/0 = 0
 1:1/0 = 0
 
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_7sg47"]
+resource_name = "More2"
+texture = ExtResource("8_d4q2g")
+margins = Vector2i(12, 157)
+separation = Vector2i(28, 0)
+texture_region_size = Vector2i(356, 567)
+0:0/0 = 0
+1:0/0 = 0
+2:0/0 = 0
+3:0/0 = 0
+
 [resource]
 sources/0 = SubResource("TileSetAtlasSource_oqqlj")
 sources/1 = SubResource("TileSetAtlasSource_pp0gr")
@@ -108,3 +137,5 @@ sources/4 = SubResource("TileSetAtlasSource_53e4p")
 sources/5 = SubResource("TileSetAtlasSource_7vov2")
 sources/6 = SubResource("TileSetAtlasSource_86l0a")
 sources/7 = SubResource("TileSetAtlasSource_podx1")
+sources/2 = SubResource("TileSetAtlasSource_ouagn")
+sources/8 = SubResource("TileSetAtlasSource_7sg47")

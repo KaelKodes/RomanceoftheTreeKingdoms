@@ -276,6 +276,24 @@ public partial class DatabaseMigration
                 try { ExecuteSql(conn, "ALTER TABLE officers ADD COLUMN portrait_source_id INTEGER DEFAULT 0;"); }
                 catch (Exception ex) { GD.PrintErr($"[Migration] Failed to add portrait_source_id: {ex.Message}"); }
             }
+            if (!ColumnExists(conn, "officers", "portrait_coords"))
+            {
+                GD.Print("[Migration] Adding 'portrait_coords' to officers...");
+                try { ExecuteSql(conn, "ALTER TABLE officers ADD COLUMN portrait_coords VARCHAR DEFAULT '0,0';"); }
+                catch (Exception ex) { GD.PrintErr($"[Migration] Failed to add portrait_coords: {ex.Message}"); }
+            }
+            if (!ColumnExists(conn, "officers", "formation_type"))
+            {
+                GD.Print("[Migration] Adding 'formation_type' to officers...");
+                try { ExecuteSql(conn, "ALTER TABLE officers ADD COLUMN formation_type INTEGER DEFAULT 0;"); }
+                catch (Exception ex) { GD.PrintErr($"[Migration] Failed to add formation_type: {ex.Message}"); }
+            }
+            if (!ColumnExists(conn, "officers", "last_mentored_day"))
+            {
+                GD.Print("[Migration] Adding 'last_mentored_day' to officers...");
+                try { ExecuteSql(conn, "ALTER TABLE officers ADD COLUMN last_mentored_day INTEGER DEFAULT 0;"); }
+                catch (Exception ex) { GD.PrintErr($"[Migration] Failed to add last_mentored_day: {ex.Message}"); }
+            }
             // Migration 12: Update Routes (Mistwood Connection)
             // Remove Mistwood <-> River Port
             // Add Mistwood <-> South Fields

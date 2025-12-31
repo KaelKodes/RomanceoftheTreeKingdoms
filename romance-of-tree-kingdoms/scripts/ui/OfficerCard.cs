@@ -63,7 +63,7 @@ public partial class OfficerCard : Window
 			cmd.CommandText = @"
                 SELECT o.name, f.name, o.leadership, o.intelligence, o.strength, o.politics, f.leader_id, o.faction_id, o.rank, o.reputation, o.battles_won, o.charisma, 
                        (SELECT COUNT(*) FROM cities WHERE governor_id = o.officer_id AND city_id = o.location_id) as is_local_gov,
-                       o.portrait_source_id, o.portrait_coords
+                        o.portrait_source_id, o.portrait_coords, o.formation_type, o.location_id, o.main_troop_type, o.officer_type
                 FROM officers o
                 LEFT JOIN factions f ON o.faction_id = f.faction_id
 				WHERE o.officer_id = $oid";
@@ -89,6 +89,19 @@ public partial class OfficerCard : Window
 					bool isGov = r.GetInt32(12) > 0;
 					int pSrc = r.IsDBNull(13) ? 0 : r.GetInt32(13);
 					string pCoords = r.IsDBNull(14) ? "0,0" : r.GetString(14);
+					int targetLoc = r.GetInt32(16);
+
+					// Get Player Loc
+					int playerLoc = -1;
+					using (var pLocCmd = conn.CreateCommand())
+					{
+						pLocCmd.CommandText = "SELECT location_id FROM officers WHERE officer_id = $pid";
+						pLocCmd.Parameters.AddWithValue("$pid", _playerId);
+						var pRes = pLocCmd.ExecuteScalar();
+						if (pRes != null) playerLoc = Convert.ToInt32(pRes);
+					}
+
+					bool isLocal = (playerLoc == targetLoc);
 
 					// Load Portrait
 					// Load Atlas
@@ -102,13 +115,21 @@ public partial class OfficerCard : Window
 						var region = atlas.GetSource(pSrc) as TileSetAtlasSource;
 						if (region != null)
 						{
-							// Create AtlasTexture
-							var tex = new AtlasTexture();
-							tex.Atlas = region.Texture;
-							tex.Region = region.GetTileTextureRegion(new Vector2I(x, y));
-							_portrait.Texture = tex;
-							_portrait.ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize; // Use actual size? Or Keep Aspect Centered
-							_portrait.StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered;
+							Vector2I coords = new Vector2I(x, y);
+							if (region.HasTile(coords))
+							{
+								// Create AtlasTexture
+								var tex = new AtlasTexture();
+								tex.Atlas = region.Texture;
+								tex.Region = region.GetTileTextureRegion(coords);
+								_portrait.Texture = tex;
+								_portrait.ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize;
+								_portrait.StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered;
+							}
+							else
+							{
+								GD.PrintErr($"[OfficerCard] Invalid Portrait Coords: {x},{y} for Source {pSrc}");
+							}
 						}
 					}
 
@@ -141,29 +162,63 @@ public partial class OfficerCard : Window
 					else _relLabel.Modulate = Colors.White;
 
 					// Mask Stats?
+					int fType = r.IsDBNull(15) ? 0 : r.GetInt32(15);
+					int mtt = r.IsDBNull(17) ? 0 : r.GetInt32(17);
+					int oct = r.IsDBNull(18) ? 0 : r.GetInt32(18);
+
 					// Logic: If Rel < 10, show range or ???.
 					// For now: Mask completely if Rel < 10.
 					if (rel >= 10 || _officerId == _playerId) // Always know self
 					{
 						_statsLabel.Text = $"Leadership: {ldr}\nInt: {intl} | Str: {str}\nPol: {pol} | Cha: {cha}";
+						if (_officerId != _playerId)
+						{
+							TroopType tt = (mtt > 0) ? (TroopType)(mtt - 1) : TroopType.Infantry;
+							TroopType ot = (oct > 0) ? (TroopType)(oct - 1) : TroopType.Infantry;
+							_statsLabel.Text += $"\nFormation: {(FormationShape)fType}\nTroop: {tt} | Battle: {ot}";
+						}
 					}
 					else
 					{
 						_statsLabel.Text = "Stats: ??? (Get closer to reveal)";
 					}
 
-					SetupActions(rel, isLeader, factionId, isGov);
+					SetupActions(rel, isLeader, factionId, isGov, fType, isLocal, mtt, oct);
 				}
 			}
 		}
 	}
 
-	private void SetupActions(int rel, bool isTargetLeader, int targetFactionId, bool isTargetGovernor)
+	private void SetupActions(int rel, bool isTargetLeader, int targetFactionId, bool isTargetGovernor, int currentFormation, bool isLocal, int currentTroopIdx, int currentOffTypeIdx)
 	{
 		// Clear
 		foreach (Node c in _actionContainer.GetChildren()) c.QueueFree();
 
-		if (_officerId == _playerId) return; // No actions on self
+		if (_officerId == _playerId)
+		{
+			// Self Actions
+			AddButton($"Formation: {(FormationShape)currentFormation} (Cycle)", () => OnFormationCycle(currentFormation));
+
+			// Resolve Troop Type display
+			TroopType tt = (currentTroopIdx > 0) ? (TroopType)(currentTroopIdx - 1) : TroopType.Infantry;
+			AddButton($"Troop Type: {tt} (Cycle)", () => OnTroopCycle(currentTroopIdx));
+
+			// Resolve Battle Type (Officer Type) display
+			TroopType ot = (currentOffTypeIdx > 0) ? (TroopType)(currentOffTypeIdx - 1) : TroopType.Infantry;
+			AddButton($"Battle Type: {ot} (Cycle)", () => OnBattleTypeCycle(currentOffTypeIdx));
+
+			return;
+		}
+
+		if (!isLocal)
+		{
+			var lbl = new Label();
+			lbl.Text = "Cannot Interact (Travel to same city)";
+			lbl.Modulate = Colors.Gray;
+			lbl.HorizontalAlignment = HorizontalAlignment.Center;
+			_actionContainer.AddChild(lbl);
+			return;
+		}
 
 		// Talk
 		AddButton("Talk (1 AP)", () => OnTalkPressed());
@@ -225,6 +280,45 @@ public partial class OfficerCard : Window
 		var am = GetNode<ActionManager>("/root/ActionManager");
 		am.PerformJoinFaction(_playerId, _officerId);
 		Refresh();
+	}
+
+	private void OnFormationCycle(int current)
+	{
+		int next = (current + 1) % 4; // Cycle 0-3 (Surrounded, Vanguard, RearGuard, Line)
+									  // Update DB
+		UpdateOfficerTypeStat("formation_type", next);
+		Refresh();
+	}
+
+	private void OnTroopCycle(int currentIdx)
+	{
+		// currentIdx is 0 (auto) or 1-5 (enum values 0-4 + 1)
+		int currentType = (currentIdx == 0) ? -1 : (currentIdx - 1);
+		int nextType = (currentType + 1) % 5;
+		UpdateOfficerTypeStat("main_troop_type", nextType + 1);
+		Refresh();
+	}
+
+	private void OnBattleTypeCycle(int currentIdx)
+	{
+		int currentType = (currentIdx == 0) ? -1 : (currentIdx - 1);
+		int nextType = (currentType + 1) % 5;
+		UpdateOfficerTypeStat("officer_type", nextType + 1);
+		Refresh();
+	}
+
+	private void UpdateOfficerTypeStat(string columnName, int value)
+	{
+		string dbPath = System.IO.Path.Combine(ProjectSettings.GlobalizePath("res://"), "../tree_kingdoms.db");
+		using (var conn = new SqliteConnection($"Data Source={dbPath}"))
+		{
+			conn.Open();
+			var cmd = conn.CreateCommand();
+			cmd.CommandText = $"UPDATE officers SET {columnName} = $val WHERE officer_id = $oid";
+			cmd.Parameters.AddWithValue("$val", value);
+			cmd.Parameters.AddWithValue("$oid", _officerId);
+			cmd.ExecuteNonQuery();
+		}
 	}
 
 	private int GetPlayerIdFromDB()

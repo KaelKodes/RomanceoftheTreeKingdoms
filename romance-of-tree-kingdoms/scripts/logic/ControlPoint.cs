@@ -119,13 +119,34 @@ public partial class ControlPoint : Node2D
 
 	public void TakeDamage(int amount)
 	{
+		// CPs are now untargetable/invulnerable unless they are Gates/Walls
+		if (Type != CPType.Gate)
+		{
+			return;
+		}
+
 		if (IsDestroyed) return;
 		CurrentHealth -= amount;
 		if (CurrentHealth <= 0)
 		{
 			CurrentHealth = 0;
 			GD.Print($"Control Point {Type} Destroyed!");
-			_sprite.Modulate = Colors.DarkGray; // visual feedback
+			_sprite.Modulate = Colors.DarkGray;
+		}
+	}
+
+	public void Capture(int factionId)
+	{
+		if (OwnerFactionId != factionId)
+		{
+			int oldOwner = OwnerFactionId;
+			SetOwner(factionId);
+			GD.Print($"Control Point ({GridPosition}) captured by Faction {factionId}! (Was: {oldOwner})");
+
+			// Visual Feedback for Capture
+			var tween = CreateTween();
+			_sprite.Scale = new Vector2(2.5f, 2.5f);
+			tween.TweenProperty(_sprite, "scale", new Vector2(2.0f, 2.0f), 0.3f).SetTrans(Tween.TransitionType.Bounce);
 		}
 	}
 

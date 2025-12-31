@@ -244,7 +244,7 @@ public partial class FactionAI : Node
                 break;
             case "Prosper":
                 if (GetIdleOfficers(conn, factionId).Count < 5) task = "RecruitOfficer";
-                else task = (new Random().NextDouble() > 0.5) ? "DevelopEconomy" : "Research";
+                else task = GetNextDomesticTask(conn, factionId);
                 break;
             case "Stability":
             default:
@@ -378,6 +378,9 @@ public partial class FactionAI : Node
                 break;
             case "Fortify":
                 am.PerformDomesticAction(officer.OfficerId, officer.LocationId, ActionManager.DomesticType.Defense);
+                break;
+            case "Cultivate":
+                am.PerformDomesticAction(officer.OfficerId, officer.LocationId, ActionManager.DomesticType.Agriculture);
                 break;
             case "RecruitOfficer":
                 int roninId = FindRoninInCity(conn, officer.LocationId);
@@ -736,6 +739,51 @@ public partial class FactionAI : Node
         if (ratio < 0.25f) return true;
 
         return false;
+    }
+
+    private string GetNextDomesticTask(SqliteConnection conn, int factionId)
+    {
+        // 1. Find HQ or primary city
+        int cityId = 0;
+        var hqCmd = conn.CreateCommand();
+        hqCmd.CommandText = "SELECT city_id FROM cities WHERE faction_id = $fid AND is_hq = 1 LIMIT 1";
+        hqCmd.Parameters.AddWithValue("$fid", factionId);
+        var res = hqCmd.ExecuteScalar();
+        if (res == null || res == DBNull.Value)
+        {
+            hqCmd.CommandText = "SELECT city_id FROM cities WHERE faction_id = $fid LIMIT 1";
+            res = hqCmd.ExecuteScalar();
+        }
+
+        if (res == null || res == DBNull.Value) return "DevelopEconomy";
+        cityId = Convert.ToInt32(res);
+
+        // 2. Get Stats
+        int commerce = 0, agriculture = 0, technology = 0, maxStats = 1000;
+        var cityCmd = conn.CreateCommand();
+        cityCmd.CommandText = "SELECT commerce, agriculture, technology, max_stats FROM cities WHERE city_id = $cid";
+        cityCmd.Parameters.AddWithValue("$cid", cityId);
+        using (var reader = cityCmd.ExecuteReader())
+        {
+            if (reader.Read())
+            {
+                commerce = reader.GetInt32(0);
+                agriculture = reader.GetInt32(1);
+                technology = reader.GetInt32(2);
+                maxStats = reader.IsDBNull(3) ? 1000 : reader.GetInt32(3);
+            }
+        }
+
+        // 3. Increment Logic (250, 500, 750, 1000)
+        int[] tiers = { 250, 500, 750, maxStats };
+        foreach (int tier in tiers)
+        {
+            if (commerce < tier) return "DevelopEconomy";
+            if (agriculture < tier) return "Cultivate";
+            if (technology < tier) return "Research";
+        }
+
+        return "Recruit"; // Everything maxed? Build army.
     }
 
     private int GetFactionGold(SqliteConnection conn, int officerId)

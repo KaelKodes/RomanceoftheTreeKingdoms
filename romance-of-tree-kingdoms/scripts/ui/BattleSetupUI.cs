@@ -1,163 +1,266 @@
 using Godot;
 using System;
 using System.Linq;
+using System.Collections.Generic;
 
 public partial class BattleSetupUI : Control
 {
 	private BattleManager _battleManager;
 
+	// UI Referneces
 	private Label _titleLabel;
 	private Label _objectiveLabel;
-	private Label _attackersList;
-	private Label _defendersList;
+
+	private Control _leftCol;
+	private Label _leftFactionLabel;
+	private Control _leftCardContainer;
+
+	private Control _rightCol;
+	private Label _rightFactionLabel;
+	private Control _rightCardContainer;
 
 	private Button _joinAttackersBtn;
 	private Button _joinDefendersBtn;
 	private Button _startButton;
+	private Button _passButton;
+	private CheckBox _autoResolveCheck;
 
 	private bool _choseAttackers = false;
+	private bool _hasChosen = false;
 
 	public override void _Ready()
 	{
-		GD.Print("BattleSetupUI: _Ready started.");
-		_battleManager = GetNode<BattleManager>("/root/BattleManager");
-		GD.Print($"BattleMgr: {_battleManager != null}");
+		_battleManager = GetNodeOrNull<BattleManager>("/root/BattleManager");
+		if (_battleManager == null)
+		{
+			GD.PrintErr("BattleSetupUI: BattleManager not found!");
+			return;
+		}
 
-		// Setup UI reference (assuming basic structure for now)
-		// Root -> Panel -> VBox -> [Title, Objective, SidesHBox, StartBtn]
-		// SidesHBox -> [AttackersVBox, DefendersVBox]
+		// Wiring
+		var main = GetNode("MainPanel/VBox");
+		_titleLabel = main.GetNode<Label>("Header/TitleLabel");
+		_objectiveLabel = main.GetNode<Label>("Header/ObjectiveLabel");
 
-		// For prototyping, we'll create the UI elements in code if not found, 
-		// but ideally this is a .tscn. I'll write defensive code assuming nodes exist or need simple hookup.
+		var cols = main.GetNode("Columns");
+		_leftCol = cols.GetNode<Control>("LeftCol");
+		_leftFactionLabel = _leftCol.GetNode<Label>("HeaderBox/FactionLabel");
+		_leftCardContainer = _leftCol.GetNode<Control>("Scroll/CardContainer");
 
-		// Updated paths based on User's Latest MarginContainer Structure
-        _titleLabel = GetNodeOrNull<Label>("MarginContainer/VBoxContainer/TitleLabel");
-        _objectiveLabel = GetNodeOrNull<Label>("MarginContainer/VBoxContainer/ObjectiveLabel");
+		_rightCol = cols.GetNode<Control>("RightCol");
+		_rightFactionLabel = _rightCol.GetNode<Label>("HeaderBox/FactionLabel");
+		_rightCardContainer = _rightCol.GetNode<Control>("Scroll/CardContainer");
 
-        _joinAttackersBtn = GetNodeOrNull<Button>("MarginContainer/VBoxContainer/HBoxContainer/AttackersContainer/JoinButton");
-        _joinDefendersBtn = GetNodeOrNull<Button>("MarginContainer/VBoxContainer/HBoxContainer/DefendersContainer/JoinButton");
+		var actions = main.GetNode("ActionBar");
+		_joinAttackersBtn = actions.GetNode<Button>("JoinAttackerBtn");
+		_joinDefendersBtn = actions.GetNode<Button>("JoinDefenderBtn");
+		_startButton = actions.GetNode<Button>("StartButton");
+		_passButton = actions.GetNode<Button>("PassButton");
 
-        _attackersList = GetNodeOrNull<Label>("MarginContainer/VBoxContainer/HBoxContainer/AttackersContainer/ListLabel");
-        _defendersList = GetNodeOrNull<Label>("MarginContainer/VBoxContainer/HBoxContainer/DefendersContainer/ListLabel");
+		_autoResolveCheck = main.GetNode<CheckBox>("AutoResolveCheck");
 
-        _startButton = GetNodeOrNull<Button>("MarginContainer/VBoxContainer/StartButton");
+		// Signals
+		_joinAttackersBtn.Pressed += () => SelectSide(true);
+		_joinDefendersBtn.Pressed += () => SelectSide(false);
+		_startButton.Pressed += OnStartPressed;
+		_passButton.Pressed += OnPassPressed;
 
-        // DEBUG PRINTS
-        GD.Print($"TitleLbl: {_titleLabel != null}");
-        GD.Print($"ObjectiveLbl: {_objectiveLabel != null}");
-        GD.Print($"JoinAttBtn: {_joinAttackersBtn != null}");
-        GD.Print($"JoinDefBtn: {_joinDefendersBtn != null}");
-        GD.Print($"AttackersList: {_attackersList != null}");
-        GD.Print($"DefendersList: {_defendersList != null}");
-        GD.Print($"StartBtn: {_startButton != null}");
+		// Initial Check (if opened immediately on load)
+		if (Visible) Open();
+	}
 
-        if (_joinAttackersBtn != null) _joinAttackersBtn.Pressed += () => SelectSide(true);
-        else GD.PrintErr("JoinAttackersBtn is NULL - Check Path!");
+	public void Open()
+	{
+		Show();
+		_choseAttackers = false;
+		_hasChosen = false;
 
-        if (_joinDefendersBtn != null) _joinDefendersBtn.Pressed += () => SelectSide(false);
-        else GD.PrintErr("JoinDefendersBtn is NULL - Check Path!");
+		RefreshUI();
 
-        if (_startButton != null)
-        {
-            _startButton.Pressed += OnStartPressed;
-            _startButton.Disabled = true; // Must pick side first
-        }
-        else GD.PrintErr("StartButton is NULL - Check Path!");
+		// Check if player is already assigned (e.g. from existing context) and autoselect
+		if (_battleManager?.CurrentContext != null)
+		{
+			var ctx = _battleManager.CurrentContext;
+			var p = ctx.AllOfficers.FirstOrDefault(x => x.IsPlayer);
+			if (p != null)
+			{
+				if (ctx.AttackerOfficers.Any(x => x.IsPlayer)) SelectSide(true);
+				else if (ctx.DefenderOfficers.Any(x => x.IsPlayer)) SelectSide(false);
+			}
+		}
+	}
 
-        RefreshUI();
-    }
+	private void RefreshUI()
+	{
+		if (_battleManager?.CurrentContext == null) return;
+		var ctx = _battleManager.CurrentContext;
 
-    private void RefreshUI()
-    {
-        if (_battleManager == null)
-        {
-            GD.PrintErr("BattleSetupUI: _battleManager is NULL! Cannot refresh UI.");
-            if (_objectiveLabel != null) _objectiveLabel.Text = "Error: Battle Manager not found.";
-            return;
-        }
+		_titleLabel.Text = $"Battle for {ctx.CityName}";
+		_objectiveLabel.Text = ctx.Objective.Description;
 
-        if (_battleManager.CurrentContext == null)
-        {
-            GD.PrintErr("BattleSetupUI: CurrentContext is NULL! Cannot refresh.");
-            if (_objectiveLabel != null) _objectiveLabel.Text = "No Battle Context Found";
-            return;
-        }
+		// Faction Labels
+		_leftFactionLabel.Text = _battleManager.GetFactionName(ctx.AttackerFactionId);
+		_rightFactionLabel.Text = _battleManager.GetFactionName(ctx.DefenderFactionId);
 
-        GD.Print("BattleSetupUI: Refreshing Data...");
-        var ctx = _battleManager.CurrentContext;
-        GD.Print($"CurrentContext found: {ctx != null}");
+		// Populate Lists
+		PopulateList(_leftCardContainer, ctx.AttackerOfficers);
+		PopulateList(_rightCardContainer, ctx.DefenderOfficers);
 
-        if (_titleLabel != null) _titleLabel.Text = $"Battle for {ctx.CityName}";
-        if (_objectiveLabel != null) _objectiveLabel.Text = $"Objective: {ctx.Objective.Description}";
+		// Update Buttons
+		_startButton.Disabled = !_hasChosen;
+		if (_hasChosen)
+		{
+			_startButton.Text = _choseAttackers ? "FIGHT FOR ATTACKERS" : "DEFEND THE CITY";
 
-        // List Officers
-        if (_attackersList != null)
-        {
-            string txt = "Attackers:\n";
-            foreach (var o in ctx.AttackerOfficers) txt += $"- {o.Name} (Ldr:{o.Leadership}, Str:{o.Strength})\n";
-            _attackersList.Text = txt;
-        }
+			// Visual Feedback
+			_joinAttackersBtn.Modulate = _choseAttackers ? Colors.Green : Colors.White;
+			_joinDefendersBtn.Modulate = !_choseAttackers ? Colors.Green : Colors.White;
+		}
+		else
+		{
+			_startButton.Text = "CHOOSE A SIDE";
+			_joinAttackersBtn.Modulate = Colors.White;
+			_joinDefendersBtn.Modulate = Colors.White;
+		}
+	}
 
-        if (_defendersList != null)
-        {
-            string txt = "Defenders:\n";
-            foreach (var o in ctx.DefenderOfficers) txt += $"- {o.Name} (Ldr:{o.Leadership}, Str:{o.Strength})\n";
-            _defendersList.Text = txt;
-        }
-    }
+	private void PopulateList(Control container, System.Collections.Generic.List<BattleOfficer> officers)
+	{
+		// Clear old
+		foreach (Node child in container.GetChildren()) child.QueueFree();
 
-    private void SelectSide(bool attackers)
-    {
-        _choseAttackers = attackers;
-        GD.Print($"Player chose {(attackers ? "Attackers" : "Defenders")}");
+		foreach (var off in officers)
+		{
+			var card = CreateOfficerRow(off);
+			container.AddChild(card);
+		}
+	}
 
-        // Logic: Move Player to the chosen list
-        if (_battleManager.CurrentContext != null)
-        {
-            var ctx = _battleManager.CurrentContext;
-            // Find Player
-            var playerObj = ctx.AllOfficers.FirstOrDefault(o => o.IsPlayer);
-            if (playerObj != null)
-            {
-                // Remove from both lists first to avoid duplicates
-                ctx.AttackerOfficers.Remove(playerObj);
-                ctx.DefenderOfficers.Remove(playerObj);
+	private Control CreateOfficerRow(BattleOfficer off)
+	{
+		var panel = new PanelContainer();
+		// Style
+		var style = new StyleBoxFlat();
+		style.BgColor = new Color(0.2f, 0.2f, 0.2f, 0.5f);
+		style.CornerRadiusTopLeft = 5;
+		style.CornerRadiusTopRight = 5;
+		style.CornerRadiusBottomLeft = 5;
+		style.CornerRadiusBottomRight = 5;
+		if (off.IsPlayer)
+		{
+			style.BgColor = new Color(0.3f, 0.3f, 0.1f, 0.6f); // Gold tint
+			style.BorderWidthBottom = 2;
+			style.BorderColor = Colors.Gold;
+		}
+		panel.AddThemeStyleboxOverride("panel", style);
 
-                // Add to target list
-                if (attackers) ctx.AttackerOfficers.Add(playerObj);
-                else ctx.DefenderOfficers.Add(playerObj);
+		var hbox = new HBoxContainer();
+		hbox.CustomMinimumSize = new Vector2(0, 40); // Height
+		panel.AddChild(hbox);
 
-                // Update Objective Text based on side?
-                // Simple toggle for now
-                if (attackers) ctx.Objective.Description = "Capture the City! Defeat enemy commander.";
-                else ctx.Objective.Description = "Defend the City! Repel invaders.";
+		// Spacer
+		var spacer = new Control();
+		spacer.CustomMinimumSize = new Vector2(10, 0);
+		hbox.AddChild(spacer);
 
-                RefreshUI(); // Update the lists visually
-            }
-        }
+		// Name
+		var nameLbl = new Label();
+		nameLbl.Text = off.Name;
+		nameLbl.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		if (off.IsPlayer) nameLbl.Modulate = Colors.Gold;
+		else if (off.Rank == "Sovereign" || off.Rank == "Commander") nameLbl.Modulate = new Color(1, 0.6f, 0.6f); // Reddish for commanders
+		hbox.AddChild(nameLbl);
 
-        if (_startButton != null)
-        {
-            _startButton.Disabled = false;
-            _startButton.Text = $"Confirm & Fight for {(attackers ? "Attackers" : "Defenders")}";
-        }
-    }
+		// Stats
+		var statsLbl = new Label();
+		statsLbl.Text = $"Ldr:{off.Leadership} Str:{off.Strength}";
+		statsLbl.Modulate = new Color(0.8f, 0.8f, 0.8f);
+		statsLbl.CustomMinimumSize = new Vector2(120, 0);
+		hbox.AddChild(statsLbl);
 
-    private void OnStartPressed()
-    {
-        GD.Print("Battle Started! Loading BattleMap...");
+		// Troops
+		var troopLbl = new Label();
+		troopLbl.Text = $"{off.Troops} ({off.MainTroopType})";
+		//troopLbl.Text = $"{off.Troops}";
+		troopLbl.CustomMinimumSize = new Vector2(100, 0);
+		troopLbl.HorizontalAlignment = HorizontalAlignment.Right;
+		hbox.AddChild(troopLbl);
 
-        // 1. Mark Player as "In Battle" (maybe consume all AP?)
-        // var am = GetNode<ActionManager>("/root/ActionManager");
-        // am.ConsumeAllAP(); 
+		// End Spacer
+		var spacer2 = new Control();
+		spacer2.CustomMinimumSize = new Vector2(10, 0);
+		hbox.AddChild(spacer2);
 
-        // 2. Do NOT End Turn yet. The battle IS the turn (or part of it).
-        // var turnMgr = GetNode<TurnManager>("/root/TurnManager");
-        // turnMgr.PlayerEndTurn();
+		return panel;
+	}
 
-        // 3. Load the Battle Map
-        GetTree().ChangeSceneToFile("res://scenes/BattleMap.tscn");
+	private void SelectSide(bool attackers)
+	{
+		_hasChosen = true;
+		_choseAttackers = attackers;
 
-        QueueFree(); // Close the setup UI
-    }
+		if (_battleManager.CurrentContext != null)
+		{
+			var ctx = _battleManager.CurrentContext;
+			var player = ctx.AllOfficers.FirstOrDefault(x => x.IsPlayer);
+
+			if (player != null)
+			{
+				// Remove from both lists
+				if (ctx.AttackerOfficers.Contains(player)) ctx.AttackerOfficers.Remove(player);
+				if (ctx.DefenderOfficers.Contains(player)) ctx.DefenderOfficers.Remove(player);
+
+				// Add to new side
+				if (attackers) ctx.AttackerOfficers.Add(player);
+				else ctx.DefenderOfficers.Add(player);
+
+				// Update Objective text locally for feedback
+				if (attackers) ctx.Objective.Description = "Assault the city and seize control!";
+				else ctx.Objective.Description = "Repel the invaders and hold the city!";
+			}
+		}
+
+		RefreshUI();
+	}
+
+	private void OnStartPressed()
+	{
+		Hide(); // Just hide, don't destroy
+
+		if (_autoResolveCheck.ButtonPressed)
+		{
+			GD.Print("Battle Started (Auto-Resolve)! Simulating...");
+			if (_battleManager != null && _battleManager.CurrentContext != null)
+			{
+				// Player is already in the lists (selected side), so just simulate
+				_battleManager.SimulateBattle(_battleManager.CurrentContext.AttackerFactionId, _battleManager.CurrentContext.LocationId);
+			}
+		}
+		else
+		{
+			GD.Print("Battle Started! Loading BattleMap...");
+			GetTree().ChangeSceneToFile("res://scenes/BattleMap.tscn");
+		}
+	}
+
+	private void OnPassPressed()
+	{
+		GD.Print("Player chose to PASS (Skip). Removing from lists and simulating...");
+		Hide(); // Just hide, don't destroy
+
+		if (_battleManager != null && _battleManager.CurrentContext != null)
+		{
+			var ctx = _battleManager.CurrentContext;
+			var player = ctx.AllOfficers.FirstOrDefault(x => x.IsPlayer);
+			if (player != null)
+			{
+				// Remove player from conflict entirely
+				ctx.AllOfficers.Remove(player);
+				ctx.AttackerOfficers.Remove(player);
+				ctx.DefenderOfficers.Remove(player);
+			}
+
+			_battleManager.SimulateBattle(ctx.AttackerFactionId, ctx.LocationId);
+		}
+	}
 }

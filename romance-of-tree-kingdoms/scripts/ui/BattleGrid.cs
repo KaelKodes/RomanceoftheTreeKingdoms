@@ -300,8 +300,8 @@ public partial class BattleGrid : Node2D // Changed from TileMap
 
 	public Vector2 GridToWorld(Vector2I gridPos)
 	{
-		// Top-left of tile
-		return ToGlobal(new Vector2(gridPos.X * TILE_SIZE, gridPos.Y * TILE_SIZE));
+		// Center of tile
+		return ToGlobal(new Vector2(gridPos.X * TILE_SIZE + TILE_SIZE / 2f, gridPos.Y * TILE_SIZE + TILE_SIZE / 2f));
 	}
 
 	// A* Pathfinding

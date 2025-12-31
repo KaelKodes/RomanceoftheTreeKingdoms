@@ -36,8 +36,20 @@ public partial class WorldGenerator : Node
 		// Other2 (Source 4) - Unique Sizes
 		{ "Fisherman", (4, "2,1") }, { "Lin Zhi", (4, "3,1") },
 
+		// More1 (Source 2) - New Portraits
+		{ "Sun Quan", (2, "0,0") }, { "Pang Tong", (2, "1,0") }, { "Xun Yu", (2, "2,0") },
+        { "Wei Yan", (2, "0,1") }, { "Deng Ai", (2, "1,1") }, { "Sun Ce", (2, "2,1") },
+        { "Jiang Wei", (2, "0,2") }, { "Taishi Ci", (2, "1,2") }, { "Xiahou Dun", (2, "2,2") },
+
+		// More2 (Source 8) - New Portraits
+		{ "Lu Meng", (8, "1,0") }, { "Dong Zhuo", (8, "2,0") },
+        { "Lu Su", (8, "3,0") },
+
 		// Custom (Source 0)
-		{ "Han De", (0, "2,2") }
+		{ "Han De", (0, "2,2") },
+
+		// Wu (Source 7)
+		{ "Zhou Yu", (7, "3,0") }
     };
 
     private List<(int Source, string Coords)> _genericPool = new List<(int, string)>();

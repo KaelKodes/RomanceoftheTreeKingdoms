@@ -80,18 +80,42 @@ mouse_filter = 2
 [node name="Panel" type="Panel" parent="PlayerHud"]
 layout_mode = 2
 
-[node name="PlayerStats" type="HBoxContainer" parent="PlayerHud"]
+[node name="HBoxContainer" type="HBoxContainer" parent="PlayerHud"]
+layout_mode = 2
+theme_override_constants/separation = 18
+
+[node name="RankUpContainer" type="HBoxContainer" parent="PlayerHud/HBoxContainer"]
+layout_mode = 2
+
+[node name="AVAILABLELabel" type="Label" parent="PlayerHud/HBoxContainer/RankUpContainer"]
+layout_mode = 2
+text = "#"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="RankUpLabel" type="Label" parent="PlayerHud/HBoxContainer/RankUpContainer"]
+layout_mode = 2
+size_flags_horizontal = 0
+text = "Level Up! "
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="SubmitButton" type="Button" parent="PlayerHud/HBoxContainer/RankUpContainer"]
+layout_mode = 2
+text = "Submit"
+
+[node name="PlayerStats" type="HBoxContainer" parent="PlayerHud/HBoxContainer"]
 layout_mode = 2
 size_flags_horizontal = 8
 size_flags_vertical = 4
 mouse_filter = 2
 alignment = 2
 
-[node name="Label" type="Label" parent="PlayerHud/PlayerStats"]
+[node name="Label" type="Label" parent="PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
 text = "Str: "
 
-[node name="STRSpinBox" type="SpinBox" parent="PlayerHud/PlayerStats"]
+[node name="STRSpinBox" type="SpinBox" parent="PlayerHud/HBoxContainer/PlayerStats"]
 custom_minimum_size = Vector2(25, 0)
 layout_mode = 2
 size_flags_horizontal = 4
@@ -99,73 +123,48 @@ size_flags_vertical = 4
 alignment = 1
 editable = false
 
-[node name="Label2" type="Label" parent="PlayerHud/PlayerStats"]
+[node name="Label2" type="Label" parent="PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
 text = "Lea: "
 
-[node name="LEASpinBox" type="SpinBox" parent="PlayerHud/PlayerStats"]
+[node name="LEASpinBox" type="SpinBox" parent="PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
 size_flags_horizontal = 4
 size_flags_vertical = 4
 alignment = 1
 editable = false
 
-[node name="Label3" type="Label" parent="PlayerHud/PlayerStats"]
+[node name="Label3" type="Label" parent="PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
 text = "Int: "
 
-[node name="INTSpinBox" type="SpinBox" parent="PlayerHud/PlayerStats"]
+[node name="INTSpinBox" type="SpinBox" parent="PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
 size_flags_horizontal = 4
 size_flags_vertical = 4
 alignment = 1
 editable = false
 
-[node name="Label4" type="Label" parent="PlayerHud/PlayerStats"]
+[node name="Label4" type="Label" parent="PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
 text = "Pol: "
 
-[node name="POLSpinBox" type="SpinBox" parent="PlayerHud/PlayerStats"]
+[node name="POLSpinBox" type="SpinBox" parent="PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
 size_flags_horizontal = 4
 size_flags_vertical = 4
 alignment = 1
 editable = false
 
-[node name="Label5" type="Label" parent="PlayerHud/PlayerStats"]
+[node name="Label5" type="Label" parent="PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
 text = "Cha: "
 
-[node name="CHASpinBox" type="SpinBox" parent="PlayerHud/PlayerStats"]
+[node name="CHASpinBox" type="SpinBox" parent="PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
 size_flags_horizontal = 4
 size_flags_vertical = 4
 alignment = 1
 editable = false
-
-[node name="RankUpContainer" type="VBoxContainer" parent="."]
-layout_mode = 0
-offset_left = 136.0
-offset_top = 559.0
-offset_right = 211.0
-offset_bottom = 644.0
-
-[node name="AVAILABLELabel" type="Label" parent="RankUpContainer"]
-visible = false
-layout_mode = 2
-text = "#"
-horizontal_alignment = 1
-vertical_alignment = 1
-
-[node name="RankUpLabel" type="Label" parent="RankUpContainer"]
-layout_mode = 2
-size_flags_horizontal = 0
-text = "Level Up! "
-horizontal_alignment = 1
-vertical_alignment = 1
-
-[node name="SubmitButton" type="Button" parent="RankUpContainer"]
-layout_mode = 2
-text = "Submit"
 
 [connection signal="pressed" from="MarginContainer/VBoxContainer/EndDayButton" to="." method="OnEndDayPressed"]

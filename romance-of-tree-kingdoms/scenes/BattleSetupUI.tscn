@@ -1,8 +1,14 @@
-[gd_scene load_steps=2 format=3 uid="uid://dhfrj1h0dh64w"]
+[gd_scene load_steps=3 format=3 uid="uid://dhfrj1h0dh64w"]
 
 [ext_resource type="Script" uid="uid://ci4x2hgwimyv5" path="res://scripts/ui/BattleSetupUI.cs" id="1_6ew7h"]
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_6ew7h"]
+bg_color = Color(0.105882354, 0.105882354, 0.105882354, 0.9254902)
+
 [node name="BattleSetupUI" type="Control"]
+visible = false
+top_level = true
+z_index = 40
 layout_mode = 3
 anchors_preset = 8
 anchor_left = 0.5
@@ -11,58 +17,160 @@ anchor_right = 0.5
 anchor_bottom = 0.5
 grow_horizontal = 2
 grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
 script = ExtResource("1_6ew7h")
 
-[node name="MarginContainer" type="MarginContainer" parent="."]
-layout_mode = 0
-offset_right = 143.0
-offset_bottom = 147.0
+[node name="Background" type="ColorRect" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.784314)
 
-[node name="Panel" type="Panel" parent="MarginContainer"]
-layout_mode = 2
+[node name="MainPanel" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -403.0
+offset_top = -201.0
+offset_right = 403.0
+offset_bottom = 201.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_6ew7h")
 
-[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
-layout_mode = 2
-alignment = 1
+[node name="VBox" type="VBoxContainer" parent="MainPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = 2.0
+offset_right = -20.0
+offset_bottom = -2.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 4
 
-[node name="TitleLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+[node name="Header" type="VBoxContainer" parent="MainPanel/VBox"]
 layout_mode = 2
-text = "Title"
+theme_override_constants/separation = 0
+
+[node name="TitleLabel" type="Label" parent="MainPanel/VBox/Header"]
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"HeaderLarge"
+text = "Battle for City Name"
 horizontal_alignment = 1
 
-[node name="ObjectiveLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+[node name="ObjectiveLabel" type="Label" parent="MainPanel/VBox/Header"]
 layout_mode = 2
-text = "Objective:"
+theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
+text = "Objective: Capture the city and defeat the commander."
 horizontal_alignment = 1
 
-[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
+[node name="HSeparator" type="HSeparator" parent="MainPanel/VBox"]
+layout_mode = 2
+
+[node name="Columns" type="HBoxContainer" parent="MainPanel/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 40
+
+[node name="LeftCol" type="VBoxContainer" parent="MainPanel/VBox/Columns"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="HeaderBox" type="HBoxContainer" parent="MainPanel/VBox/Columns/LeftCol"]
 layout_mode = 2
 alignment = 1
 
-[node name="AttackersContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/HBoxContainer"]
+[node name="Label" type="Label" parent="MainPanel/VBox/Columns/LeftCol/HeaderBox"]
+layout_mode = 2
+theme_type_variation = &"HeaderMedium"
+theme_override_colors/font_color = Color(1, 0.4, 0.4, 1)
+text = "ATTACKERS"
+
+[node name="FactionLabel" type="Label" parent="MainPanel/VBox/Columns/LeftCol/HeaderBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "(Faction A)"
+
+[node name="Scroll" type="ScrollContainer" parent="MainPanel/VBox/Columns/LeftCol"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="CardContainer" type="VBoxContainer" parent="MainPanel/VBox/Columns/LeftCol/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="RightCol" type="VBoxContainer" parent="MainPanel/VBox/Columns"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="HeaderBox" type="HBoxContainer" parent="MainPanel/VBox/Columns/RightCol"]
 layout_mode = 2
 alignment = 1
 
-[node name="ListLabel" type="Label" parent="MarginContainer/VBoxContainer/HBoxContainer/AttackersContainer"]
+[node name="Label" type="Label" parent="MainPanel/VBox/Columns/RightCol/HeaderBox"]
 layout_mode = 2
-text = "Attacker"
+theme_type_variation = &"HeaderMedium"
+theme_override_colors/font_color = Color(0.4, 0.6, 1, 1)
+text = "DEFENDERS"
 
-[node name="JoinButton" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer/AttackersContainer"]
+[node name="FactionLabel" type="Label" parent="MainPanel/VBox/Columns/RightCol/HeaderBox"]
 layout_mode = 2
-text = "Join"
+theme_override_font_sizes/font_size = 14
+text = "(Faction B)"
 
-[node name="DefendersContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/HBoxContainer"]
+[node name="Scroll" type="ScrollContainer" parent="MainPanel/VBox/Columns/RightCol"]
 layout_mode = 2
+size_flags_vertical = 3
+
+[node name="CardContainer" type="VBoxContainer" parent="MainPanel/VBox/Columns/RightCol/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="HSeparator2" type="HSeparator" parent="MainPanel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 1
+
+[node name="AutoResolveCheck" type="CheckBox" parent="MainPanel/VBox"]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Auto-Resolve Battle (Simulate Result)"
+
+[node name="ActionBar" type="HBoxContainer" parent="MainPanel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 30
 alignment = 1
 
-[node name="ListLabel" type="Label" parent="MarginContainer/VBoxContainer/HBoxContainer/DefendersContainer"]
+[node name="JoinAttackerBtn" type="Button" parent="MainPanel/VBox/ActionBar"]
+custom_minimum_size = Vector2(160, 40)
 layout_mode = 2
-text = "Defender"
+text = "Join Attackers"
 
-[node name="JoinButton" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer/DefendersContainer"]
+[node name="StartButton" type="Button" parent="MainPanel/VBox/ActionBar"]
+custom_minimum_size = Vector2(200, 50)
 layout_mode = 2
-text = "Join"
+theme_override_colors/font_color = Color(1, 1, 0, 1)
+text = "START BATTLE"
 
-[node name="StartButton" type="Button" parent="MarginContainer/VBoxContainer"]
+[node name="PassButton" type="Button" parent="MainPanel/VBox/ActionBar"]
+custom_minimum_size = Vector2(120, 40)
 layout_mode = 2
-text = "Start"
+text = "Pass (Skip)"
+
+[node name="JoinDefenderBtn" type="Button" parent="MainPanel/VBox/ActionBar"]
+custom_minimum_size = Vector2(160, 40)
+layout_mode = 2
+text = "Join Defenders"

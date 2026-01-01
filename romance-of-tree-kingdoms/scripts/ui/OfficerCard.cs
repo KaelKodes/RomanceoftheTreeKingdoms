@@ -15,8 +15,8 @@ public partial class OfficerCard : Window
 	private Label _reputationLabel;
 	private Label _winsLabel;
 	private Label _relLabel;
-	private Label _statsLabel;
-	private Label _skillsLabel;
+	private RichTextLabel _statsLabel;
+	private RichTextLabel _skillsLabel;
 	private Label _formationLabel;
 	private Label _troopLabel;
 	private Label _battleLabel;
@@ -35,8 +35,8 @@ public partial class OfficerCard : Window
 		_reputationLabel = root.GetNode<Label>("ReputationLabel");
 		_winsLabel = root.GetNode<Label>("WinsLabel");
 		_relLabel = root.GetNode<Label>("RelationLabel");
-		_statsLabel = root.GetNode<Label>("StatsLabel");
-		_skillsLabel = root.GetNode<Label>("SkillsLabel");
+		_statsLabel = root.GetNode<RichTextLabel>("StatsLabel");
+		_skillsLabel = root.GetNode<RichTextLabel>("SkillsLabel");
 		_formationLabel = root.GetNode<Label>("FormationLabel");
 		_troopLabel = root.GetNode<Label>("TroopLabel");
 		_battleLabel = root.GetNode<Label>("BattleLabel");
@@ -72,7 +72,7 @@ public partial class OfficerCard : Window
                 SELECT o.name, f.name, o.leadership, o.intelligence, o.strength, o.politics, f.leader_id, o.faction_id, o.rank, o.reputation, o.battles_won, o.charisma, 
                        (SELECT COUNT(*) FROM cities WHERE governor_id = o.officer_id AND city_id = o.location_id) as is_local_gov,
                         o.portrait_source_id, o.portrait_coords, o.formation_type, o.location_id, o.main_troop_type, o.officer_type,
-                        o.farming, o.business, o.inventing, o.fortification, o.security
+                        o.farming, o.business, o.inventing, o.fortification, o.governance, o.public_attitude
                 FROM officers o
                 LEFT JOIN factions f ON o.faction_id = f.faction_id
 				WHERE o.officer_id = $oid";
@@ -179,15 +179,16 @@ public partial class OfficerCard : Window
 					// For now: Mask completely if Rel < 10.
 					if (rel >= 10 || _officerId == _playerId) // Always know self
 					{
-						_statsLabel.Text = $"Leadership: {ldr}\nInt: {intl} | Str: {str}\nPol: {pol} | Cha: {cha}";
+						_statsLabel.Text = $"[center][hint=Leadership]Ldr[/hint]: {ldr}\n[hint=Intelligence]Int[/hint]: {intl} | [hint=Strength]Str[/hint]: {str}\n[hint=Politics]Pol[/hint]: {pol} | [hint=Charisma]Cha[/hint]: {cha}[/center]";
 
 						// Populate Skills
 						int farm = r.GetInt32(19);
 						int biz = r.GetInt32(20);
 						int inv = r.GetInt32(21);
 						int fort = r.GetInt32(22);
-						int sec = r.GetInt32(23);
-						_skillsLabel.Text = $"Farming: {farm} | Business: {biz}\nTech: {inv} | Fort: {fort} | Sec: {sec}";
+						int gov = r.GetInt32(23);
+						int pubAtt = r.GetInt32(24);
+						_skillsLabel.Text = $"[center][hint=Farming Skill]Farm[/hint]: {farm} | [hint=Business Skill]Biz[/hint]: {biz}\n[hint=Technology/Inventing Skill]Tech[/hint]: {inv} | [hint=Fortification Skill]Fort[/hint]: {fort} | [hint=Governance Skill]Gov[/hint]: {gov}\n[hint=Public Attitude Bonus]Attitude[/hint]: {pubAtt}[/center]";
 						_skillsLabel.Visible = true;
 						_skillsLabel.Modulate = Colors.Green;
 

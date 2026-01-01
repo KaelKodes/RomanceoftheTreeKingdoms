@@ -1,170 +1,274 @@
-[gd_scene load_steps=2 format=3 uid="uid://ddm416ose46sn"]
+[gd_scene load_steps=4 format=3 uid="uid://ddm416ose46sn"]
 
 [ext_resource type="Script" uid="uid://btql2t1co2oou" path="res://scripts/ui/GameHUD.cs" id="1_kr2c0"]
+[ext_resource type="PackedScene" uid="uid://d1d1d1d1d1d1d" path="res://scenes/TaskPopout.tscn" id="2_task"]
+[ext_resource type="PackedScene" uid="uid://b8x8u8u8u8u8u" path="res://scenes/CityInfoPanel.tscn" id="3_city"]
 
-[node name="GameHud" type="Control"]
+[node name="GameHud" type="Control" node_paths=PackedStringArray("PortraitRect", "NameLabel", "DateLabel", "APLabel", "GoldLabel", "EndDayButton", "TaskPopoutNode", "CurrentCityPanel", "CurrentCityOfficers", "CurrentCityActions", "SelectedCityPanel", "SelectedCityOfficers", "SelectedCityActions")]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 script = ExtResource("1_kr2c0")
+PortraitRect = NodePath("TopLeft/HBox/VBox/Portrait")
+NameLabel = NodePath("TopLeft/HBox/VBox/Info/PlayerName")
+DateLabel = NodePath("TopLeft/HBox/VBox/DateLabel")
+APLabel = NodePath("TopLeft/HBox/VBox/Status/APLabel")
+GoldLabel = NodePath("TopLeft/HBox/VBox/Status/GoldLabel")
+EndDayButton = NodePath("LeftColumn/Margin/VBox/EndDayButton")
+TaskPopoutNode = NodePath("TopLeft/HBox/TaskPopout")
+CurrentCityPanel = NodePath("LeftColumn/Margin/VBox/CurrentCityPanel")
+CurrentCityOfficers = NodePath("LeftColumn/Margin/VBox/OfficersScroll/OfficersContainer")
+CurrentCityActions = NodePath("LeftColumn/Margin/VBox/ActionsScroll/ActionsContainer")
+SelectedCityPanel = NodePath("RightColumn/Margin/VBox/SelectedCityPanel")
+SelectedCityOfficers = NodePath("RightColumn/Margin/VBox/OfficersScroll/OfficersContainer")
+SelectedCityActions = NodePath("RightColumn/Margin/VBox/ActionsScroll/ActionsContainer")
 
-[node name="MarginContainer" type="MarginContainer" parent="."]
+[node name="TopLeft" type="MarginContainer" parent="."]
 layout_mode = 1
-offset_right = 71.0
-offset_bottom = 220.0
+offset_right = 207.0
+offset_bottom = 171.0
+theme_override_constants/margin_left = -3
+theme_override_constants/margin_top = 10
 
-[node name="Panel" type="Panel" parent="MarginContainer"]
+[node name="TextureRect" type="ColorRect" parent="TopLeft"]
 layout_mode = 2
+size_flags_vertical = 3
+color = Color(0.1440624, 0.14406261, 0.14406249, 0.9843137)
 
-[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
+[node name="HBox" type="HBoxContainer" parent="TopLeft"]
 layout_mode = 2
-size_flags_vertical = 0
+theme_override_constants/separation = 24
+alignment = 1
 
-[node name="DateLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+[node name="VBox" type="VBoxContainer" parent="TopLeft/HBox"]
 layout_mode = 2
-text = "Date"
+size_flags_horizontal = 3
+alignment = 1
+
+[node name="DateLabel" type="Label" parent="TopLeft/HBox/VBox"]
+layout_mode = 2
+text = "Year 1, Month 1, Day 1"
 horizontal_alignment = 1
 
-[node name="FactionLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+[node name="Info" type="HBoxContainer" parent="TopLeft/HBox/VBox"]
 layout_mode = 2
-text = "Faction"
+
+[node name="PlayerName" type="Label" parent="TopLeft/HBox/VBox/Info"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Player Name"
 horizontal_alignment = 1
 
-[node name="RankLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+[node name="Portrait" type="TextureRect" parent="TopLeft/HBox/VBox"]
+custom_minimum_size = Vector2(80, 80)
 layout_mode = 2
-text = "Rank"
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Status" type="VBoxContainer" parent="TopLeft/HBox/VBox"]
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 8
+theme_override_constants/separation = 10
+
+[node name="APLabel" type="Label" parent="TopLeft/HBox/VBox/Status"]
+layout_mode = 2
+text = "AP: 0/3"
+
+[node name="GoldLabel" type="Label" parent="TopLeft/HBox/VBox/Status"]
+layout_mode = 2
+text = "Gold: 0"
+
+[node name="TaskPopout" parent="TopLeft/HBox" instance=ExtResource("2_task")]
+layout_mode = 2
+
+[node name="LeftColumn" type="MarginContainer" parent="."]
+custom_minimum_size = Vector2(0, 625)
+layout_mode = 1
+anchors_preset = 9
+anchor_bottom = 1.0
+offset_top = 216.0
+offset_right = 270.0
+offset_bottom = -239.0
+grow_vertical = 2
+theme_override_constants/margin_left = -2
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="Margin" type="PanelContainer" parent="LeftColumn"]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="LeftColumn/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="CurrentCityPanel" parent="LeftColumn/Margin/VBox" instance=ExtResource("3_city")]
+layout_mode = 2
+
+[node name="OfficersHeader" type="Label" parent="LeftColumn/Margin/VBox"]
+layout_mode = 2
+text = "- - - Officers - - -"
 horizontal_alignment = 1
 
-[node name="TroopsLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+[node name="OfficersScroll" type="ScrollContainer" parent="LeftColumn/Margin/VBox"]
+custom_minimum_size = Vector2(0, 125)
 layout_mode = 2
-text = "Troops"
+vertical_scroll_mode = 2
+
+[node name="OfficersContainer" type="VBoxContainer" parent="LeftColumn/Margin/VBox/OfficersScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ActionsHeader" type="Label" parent="LeftColumn/Margin/VBox"]
+layout_mode = 2
+text = "- - - Actions - - -"
 horizontal_alignment = 1
 
-[node name="RecordLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+[node name="ActionsScroll" type="ScrollContainer" parent="LeftColumn/Margin/VBox"]
 layout_mode = 2
-text = "Record"
-horizontal_alignment = 1
+size_flags_vertical = 3
 
-[node name="GoldLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+[node name="ActionsContainer" type="VBoxContainer" parent="LeftColumn/Margin/VBox/ActionsScroll"]
 layout_mode = 2
-text = "Gold"
-horizontal_alignment = 1
+size_flags_horizontal = 3
 
-[node name="APLabel" type="Label" parent="MarginContainer/VBoxContainer"]
-layout_mode = 2
-text = "AP:"
-horizontal_alignment = 1
-
-[node name="EndDayButton" type="Button" parent="MarginContainer/VBoxContainer"]
-z_index = 2
+[node name="EndDayButton" type="Button" parent="LeftColumn/Margin/VBox"]
 layout_mode = 2
 text = "End Day"
 
-[node name="PlayerHud" type="MarginContainer" parent="."]
+[node name="RightColumn" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -270.0
+offset_bottom = -366.0
+grow_horizontal = 0
+grow_vertical = 2
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="Margin" type="PanelContainer" parent="RightColumn"]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="RightColumn/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="SelectedCityPanel" parent="RightColumn/Margin/VBox" instance=ExtResource("3_city")]
+layout_mode = 2
+
+[node name="OfficersHeader" type="Label" parent="RightColumn/Margin/VBox"]
+layout_mode = 2
+text = "Officers"
+horizontal_alignment = 1
+
+[node name="OfficersScroll" type="ScrollContainer" parent="RightColumn/Margin/VBox"]
+custom_minimum_size = Vector2(0, 150)
+layout_mode = 2
+vertical_scroll_mode = 2
+
+[node name="OfficersContainer" type="VBoxContainer" parent="RightColumn/Margin/VBox/OfficersScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ActionsHeader" type="Label" parent="RightColumn/Margin/VBox"]
+layout_mode = 2
+text = "Actions"
+horizontal_alignment = 1
+
+[node name="ActionsScroll" type="ScrollContainer" parent="RightColumn/Margin/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="ActionsContainer" type="VBoxContainer" parent="RightColumn/Margin/VBox/ActionsScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="BottomBar" type="MarginContainer" parent="."]
 layout_mode = 1
 anchors_preset = 7
 anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -346.0
-offset_top = -39.0
-offset_right = 259.75
+offset_left = -300.0
+offset_top = -60.0
+offset_right = 300.0
 grow_horizontal = 2
 grow_vertical = 0
-mouse_filter = 2
+theme_override_constants/margin_bottom = 10
 
-[node name="Panel" type="Panel" parent="PlayerHud"]
+[node name="PlayerHud" type="PanelContainer" parent="BottomBar"]
 layout_mode = 2
 
-[node name="HBoxContainer" type="HBoxContainer" parent="PlayerHud"]
+[node name="HBoxContainer" type="HBoxContainer" parent="BottomBar/PlayerHud"]
 layout_mode = 2
-theme_override_constants/separation = 18
+theme_override_constants/separation = 20
+alignment = 1
 
-[node name="RankUpContainer" type="HBoxContainer" parent="PlayerHud/HBoxContainer"]
+[node name="RankUpContainer" type="HBoxContainer" parent="BottomBar/PlayerHud/HBoxContainer"]
 layout_mode = 2
 
-[node name="AVAILABLELabel" type="Label" parent="PlayerHud/HBoxContainer/RankUpContainer"]
+[node name="AVAILABLELabel" type="Label" parent="BottomBar/PlayerHud/HBoxContainer/RankUpContainer"]
 layout_mode = 2
 text = "#"
-horizontal_alignment = 1
-vertical_alignment = 1
 
-[node name="RankUpLabel" type="Label" parent="PlayerHud/HBoxContainer/RankUpContainer"]
+[node name="RankUpLabel" type="Label" parent="BottomBar/PlayerHud/HBoxContainer/RankUpContainer"]
 layout_mode = 2
-size_flags_horizontal = 0
 text = "Level Up! "
-horizontal_alignment = 1
-vertical_alignment = 1
 
-[node name="SubmitButton" type="Button" parent="PlayerHud/HBoxContainer/RankUpContainer"]
+[node name="SubmitButton" type="Button" parent="BottomBar/PlayerHud/HBoxContainer/RankUpContainer"]
 layout_mode = 2
 text = "Submit"
 
-[node name="PlayerStats" type="HBoxContainer" parent="PlayerHud/HBoxContainer"]
+[node name="PlayerStats" type="HBoxContainer" parent="BottomBar/PlayerHud/HBoxContainer"]
 layout_mode = 2
-size_flags_horizontal = 8
-size_flags_vertical = 4
-mouse_filter = 2
-alignment = 2
+alignment = 1
 
-[node name="Label" type="Label" parent="PlayerHud/HBoxContainer/PlayerStats"]
+[node name="Label" type="Label" parent="BottomBar/PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
 text = "Str: "
 
-[node name="STRSpinBox" type="SpinBox" parent="PlayerHud/HBoxContainer/PlayerStats"]
-custom_minimum_size = Vector2(25, 0)
+[node name="STRSpinBox" type="SpinBox" parent="BottomBar/PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
-size_flags_horizontal = 4
-size_flags_vertical = 4
-alignment = 1
 editable = false
 
-[node name="Label2" type="Label" parent="PlayerHud/HBoxContainer/PlayerStats"]
+[node name="Label2" type="Label" parent="BottomBar/PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
-text = "Lea: "
+text = " Lea: "
 
-[node name="LEASpinBox" type="SpinBox" parent="PlayerHud/HBoxContainer/PlayerStats"]
+[node name="LEASpinBox" type="SpinBox" parent="BottomBar/PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
-size_flags_horizontal = 4
-size_flags_vertical = 4
-alignment = 1
 editable = false
 
-[node name="Label3" type="Label" parent="PlayerHud/HBoxContainer/PlayerStats"]
+[node name="Label3" type="Label" parent="BottomBar/PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
-text = "Int: "
+text = " Int: "
 
-[node name="INTSpinBox" type="SpinBox" parent="PlayerHud/HBoxContainer/PlayerStats"]
+[node name="INTSpinBox" type="SpinBox" parent="BottomBar/PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
-size_flags_horizontal = 4
-size_flags_vertical = 4
-alignment = 1
 editable = false
 
-[node name="Label4" type="Label" parent="PlayerHud/HBoxContainer/PlayerStats"]
+[node name="Label4" type="Label" parent="BottomBar/PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
-text = "Pol: "
+text = " Pol: "
 
-[node name="POLSpinBox" type="SpinBox" parent="PlayerHud/HBoxContainer/PlayerStats"]
+[node name="POLSpinBox" type="SpinBox" parent="BottomBar/PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
-size_flags_horizontal = 4
-size_flags_vertical = 4
-alignment = 1
 editable = false
 
-[node name="Label5" type="Label" parent="PlayerHud/HBoxContainer/PlayerStats"]
+[node name="Label5" type="Label" parent="BottomBar/PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
-text = "Cha: "
+text = " Cha: "
 
-[node name="CHASpinBox" type="SpinBox" parent="PlayerHud/HBoxContainer/PlayerStats"]
+[node name="CHASpinBox" type="SpinBox" parent="BottomBar/PlayerHud/HBoxContainer/PlayerStats"]
 layout_mode = 2
-size_flags_horizontal = 4
-size_flags_vertical = 4
-alignment = 1
 editable = false
-
-[connection signal="pressed" from="MarginContainer/VBoxContainer/EndDayButton" to="." method="OnEndDayPressed"]

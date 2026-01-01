@@ -171,3 +171,35 @@ color = Color(1, 1, 1, 0.5)
 custom_minimum_size = Vector2(12, 6)
 layout_mode = 2
 color = Color(1, 1, 1, 0.5)
+
+[node name="SupplyBars" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 5.0
+offset_bottom = 15.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="LeftSupplyBar" type="ColorRect" parent="SupplyBars"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 9
+anchor_bottom = 1.0
+offset_right = 1.0
+grow_vertical = 2
+color = Color(1, 0.843, 0, 0.8)
+
+[node name="RightSupplyBar" type="ColorRect" parent="SupplyBars"]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -1.0
+grow_horizontal = 0
+grow_vertical = 2
+color = Color(1, 0.843, 0, 0.8)

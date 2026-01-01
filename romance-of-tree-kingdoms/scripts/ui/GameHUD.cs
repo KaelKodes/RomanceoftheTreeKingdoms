@@ -1,18 +1,27 @@
 using Godot;
 using Microsoft.Data.Sqlite;
 using System;
+using System.Collections.Generic;
 
 public partial class GameHUD : Control
 {
-	// UI References
-	private Label _dateLabel;
-	private Label _apLabel;
-	private Label _goldLabel; // New
-	private Label _factionLabel;
-	private Label _rankLabel;
-	private Label _troopsLabel;
-	private Label _recordLabel; // New
-	private Button _endTurnButton;
+	[Signal] public delegate void OfficerClickedEventHandler(int officerId);
+
+	[Export] public TextureRect PortraitRect;
+	[Export] public Label NameLabel;
+	[Export] public Label DateLabel;
+	[Export] public Label APLabel;
+	[Export] public Label GoldLabel;
+	[Export] public Button EndDayButton;
+
+	[Export] public TaskPopout TaskPopoutNode;
+	[Export] public CityInfoPanel CurrentCityPanel;
+	[Export] public VBoxContainer CurrentCityOfficers;
+	[Export] public VBoxContainer CurrentCityActions;
+
+	[Export] public CityInfoPanel SelectedCityPanel;
+	[Export] public VBoxContainer SelectedCityOfficers;
+	[Export] public VBoxContainer SelectedCityActions;
 
 	// Stat Allocation UI
 	private SpinBox _strSpin, _leaSpin, _intSpin, _polSpin, _chaSpin;
@@ -25,55 +34,39 @@ public partial class GameHUD : Control
 	private bool _isRefreshing = false;
 
 	// Local tracking for stats before submission
-	private System.Collections.Generic.Dictionary<string, int> _initialStats = new System.Collections.Generic.Dictionary<string, int>();
-	private System.Collections.Generic.Dictionary<string, int> _tempStats = new System.Collections.Generic.Dictionary<string, int>();
-	private System.Collections.Generic.Dictionary<string, Label> _statLabels = new System.Collections.Generic.Dictionary<string, Label>();
+	private Dictionary<string, int> _initialStats = new Dictionary<string, int>();
+	private Dictionary<string, int> _tempStats = new Dictionary<string, int>();
+	private Dictionary<string, Label> _statLabels = new Dictionary<string, Label>();
 
 	public override void _Ready()
 	{
-		// Adjust paths based on your scene tree
-		_dateLabel = GetNode<Label>("MarginContainer/VBoxContainer/DateLabel");
-		_apLabel = GetNode<Label>("MarginContainer/VBoxContainer/APLabel");
+		// Stat Allocation UI (These paths might need adjustment in the new scene)
+		_strSpin = GetNodeOrNull<SpinBox>("BottomBar/PlayerHud/HBoxContainer/PlayerStats/STRSpinBox");
+		_leaSpin = GetNodeOrNull<SpinBox>("BottomBar/PlayerHud/HBoxContainer/PlayerStats/LEASpinBox");
+		_intSpin = GetNodeOrNull<SpinBox>("BottomBar/PlayerHud/HBoxContainer/PlayerStats/INTSpinBox");
+		_polSpin = GetNodeOrNull<SpinBox>("BottomBar/PlayerHud/HBoxContainer/PlayerStats/POLSpinBox");
+		_chaSpin = GetNodeOrNull<SpinBox>("BottomBar/PlayerHud/HBoxContainer/PlayerStats/CHASpinBox");
+		_availableLabel = GetNodeOrNull<Label>("BottomBar/PlayerHud/HBoxContainer/RankUpContainer/AVAILABLELabel");
 
-		// Attempt to get GoldLabel (Safe check in case scene not updated yet)
-		_goldLabel = GetNodeOrNull<Label>("MarginContainer/VBoxContainer/GoldLabel");
+		if (_strSpin != null) _strSpin.ValueChanged += (val) => OnStatChanged(val, "strength");
+		if (_leaSpin != null) _leaSpin.ValueChanged += (val) => OnStatChanged(val, "leadership");
+		if (_intSpin != null) _intSpin.ValueChanged += (val) => OnStatChanged(val, "intelligence");
+		if (_polSpin != null) _polSpin.ValueChanged += (val) => OnStatChanged(val, "politics");
+		if (_chaSpin != null) _chaSpin.ValueChanged += (val) => OnStatChanged(val, "charisma");
 
-		_factionLabel = GetNode<Label>("MarginContainer/VBoxContainer/FactionLabel");
-		_rankLabel = GetNode<Label>("MarginContainer/VBoxContainer/RankLabel");
-		_troopsLabel = GetNode<Label>("MarginContainer/VBoxContainer/TroopsLabel");
-		// New RecordLabel
-		_recordLabel = GetNodeOrNull<Label>("MarginContainer/VBoxContainer/RecordLabel");
+		_rankUpLabel = GetNodeOrNull<Label>("BottomBar/PlayerHud/HBoxContainer/RankUpContainer/RankUpLabel");
+		_submitButton = GetNodeOrNull<Button>("BottomBar/PlayerHud/HBoxContainer/RankUpContainer/SubmitButton");
+		if (_submitButton != null) _submitButton.Pressed += OnSubmitPressed;
 
-		// Stat Allocation UI
-		_strSpin = GetNode<SpinBox>("PlayerHud/HBoxContainer/PlayerStats/STRSpinBox");
-		_leaSpin = GetNode<SpinBox>("PlayerHud/HBoxContainer/PlayerStats/LEASpinBox");
-		_intSpin = GetNode<SpinBox>("PlayerHud/HBoxContainer/PlayerStats/INTSpinBox");
-		_polSpin = GetNode<SpinBox>("PlayerHud/HBoxContainer/PlayerStats/POLSpinBox");
-		_chaSpin = GetNode<SpinBox>("PlayerHud/HBoxContainer/PlayerStats/CHASpinBox");
-		_availableLabel = GetNode<Label>("PlayerHud/HBoxContainer/RankUpContainer/AVAILABLELabel");
-
-		_strSpin.ValueChanged += (val) => OnStatChanged(val, "strength");
-		_leaSpin.ValueChanged += (val) => OnStatChanged(val, "leadership");
-		_intSpin.ValueChanged += (val) => OnStatChanged(val, "intelligence");
-		_polSpin.ValueChanged += (val) => OnStatChanged(val, "politics");
-		_chaSpin.ValueChanged += (val) => OnStatChanged(val, "charisma");
-
-		// Attempt to find button (assuming it's in the VBox or similar, user can adjust if needed/or I use Export)
-		// Ideally we use [Export] but since we are hardcoding paths based on user preference:
-		_endTurnButton = GetNode<Button>("MarginContainer/VBoxContainer/EndDayButton");
-
-		_rankUpLabel = GetNode<Label>("PlayerHud/HBoxContainer/RankUpContainer/RankUpLabel");
-		_submitButton = GetNode<Button>("PlayerHud/HBoxContainer/RankUpContainer/SubmitButton");
-		_submitButton.Pressed += OnSubmitPressed;
-		_submitButton.Hide();
-		_rankUpLabel.Hide();
+		_rankUpLabel?.Hide();
+		_submitButton?.Hide();
 
 		// Track labels for highlighting
-		_statLabels["strength"] = GetNode<Label>("PlayerHud/HBoxContainer/PlayerStats/Label");
-		_statLabels["leadership"] = GetNode<Label>("PlayerHud/HBoxContainer/PlayerStats/Label2");
-		_statLabels["intelligence"] = GetNode<Label>("PlayerHud/HBoxContainer/PlayerStats/Label3");
-		_statLabels["politics"] = GetNodeOrNull<Label>("PlayerHud/HBoxContainer/PlayerStats/Label4"); // May be missing in user diff
-		_statLabels["charisma"] = GetNode<Label>("PlayerHud/HBoxContainer/PlayerStats/Label5");
+		_statLabels["strength"] = GetNodeOrNull<Label>("BottomBar/PlayerHud/HBoxContainer/PlayerStats/Label");
+		_statLabels["leadership"] = GetNodeOrNull<Label>("BottomBar/PlayerHud/HBoxContainer/PlayerStats/Label2");
+		_statLabels["intelligence"] = GetNodeOrNull<Label>("BottomBar/PlayerHud/HBoxContainer/PlayerStats/Label3");
+		_statLabels["politics"] = GetNodeOrNull<Label>("BottomBar/PlayerHud/HBoxContainer/PlayerStats/Label4");
+		_statLabels["charisma"] = GetNodeOrNull<Label>("BottomBar/PlayerHud/HBoxContainer/PlayerStats/Label5");
 
 		RefreshHUD();
 
@@ -82,21 +75,20 @@ public partial class GameHUD : Control
 		if (actionMgr != null)
 		{
 			actionMgr.ActionPointsChanged += RefreshHUD;
-			// Also refresh on day start for new promo checks
 			actionMgr.NewDayStarted += RefreshHUD;
 			actionMgr.PlayerStatsChanged += RefreshHUD;
 		}
 
-		// Connect to TurnManager Signals (and start system)
+		// Connect to TurnManager Signals
 		var turnMgr = GetNodeOrNull<TurnManager>("/root/TurnManager");
 		if (turnMgr != null)
 		{
 			turnMgr.TurnStarted += OnTurnStarted;
 			turnMgr.TurnEnded += OnTurnEnded;
-
-			// Bootstrap the turn system if needed
 			turnMgr.EnsureTurnSystemStarted();
 		}
+
+		if (EndDayButton != null) EndDayButton.Pressed += OnEndDayPressed;
 	}
 
 	public override void _ExitTree()
@@ -119,34 +111,23 @@ public partial class GameHUD : Control
 
 	public void OnEndDayPressed()
 	{
-		// Old: actionMgr.EndDay();
-		// New: Call TurnManager
 		var turnMgr = GetNode<TurnManager>("/root/TurnManager");
 		turnMgr.PlayerEndTurn();
-		// RefreshHUD(); // Wait for signal?
 	}
 
 	private void OnTurnStarted(int factionId, bool isPlayer)
 	{
 		RefreshHUD();
-		if (isPlayer)
+		if (EndDayButton != null)
 		{
-			_endTurnButton.Disabled = false;
-			_endTurnButton.Text = "End Turn";
+			EndDayButton.Disabled = !isPlayer;
+			EndDayButton.Text = isPlayer ? "End Day" : $"Faction {factionId} Moving...";
 		}
-		else
-		{
-			_endTurnButton.Disabled = true;
-			_endTurnButton.Text = $"Faction {factionId} Moving...";
-		}
-
-		// Override text if it IS player turn
-		if (isPlayer) _endTurnButton.Text = "End Turn (Player)";
 	}
 
 	private void OnTurnEnded()
 	{
-		_endTurnButton.Disabled = true;
+		if (EndDayButton != null) EndDayButton.Disabled = true;
 	}
 
 	public void RefreshHUD()
@@ -156,218 +137,224 @@ public partial class GameHUD : Control
 		{
 			connection.Open();
 
-			// 1. Get Player AP and Extended Info
 			var cmd = connection.CreateCommand();
 			cmd.CommandText = @"
-                SELECT 
-                    o.current_action_points, 
-                    o.rank, 
-                    o.max_troops, 
-                    o.reputation, 
-                    o.battles_won, 
-                    o.battles_lost,
-                    o.gold,
-                    f.name as faction_name,
-                    o.max_action_points,
-                    o.troops,
-                    o.name, -- Added player name
-                    o.stat_points,
-                    o.strength, o.base_strength,
-                    o.leadership, o.base_leadership,
-                    o.intelligence, o.base_intelligence,
-                    o.politics, o.base_politics,
-                    o.charisma, o.base_charisma
-                FROM officers o
-                LEFT JOIN factions f ON o.faction_id = f.faction_id
+				SELECT 
+					o.current_action_points, o.max_action_points,
+					o.gold, o.name, o.location_id, o.officer_id,
+					o.stat_points,
+					o.strength, o.base_strength,
+					o.leadership, o.base_leadership,
+					o.intelligence, o.base_intelligence,
+					o.politics, o.base_politics,
+					o.charisma, o.base_charisma
+				FROM officers o
 				WHERE o.is_player = 1";
 
 			using (var r = cmd.ExecuteReader())
 			{
 				if (r.Read())
 				{
-					// Use named ordinals to prevent index shift bugs
-					int colAP = r.GetOrdinal("current_action_points");
-					int colRank = r.GetOrdinal("rank");
-					int colMaxT = r.GetOrdinal("max_troops");
-					int colRep = r.GetOrdinal("reputation");
-					int colWins = r.GetOrdinal("battles_won");
-					int colLoss = r.GetOrdinal("battles_lost");
-					int colGold = r.GetOrdinal("gold");
-					int colFact = r.GetOrdinal("faction_name");
-					int colMaxAP = r.GetOrdinal("max_action_points");
-					int colTroops = r.GetOrdinal("troops");
-					int colName = r.GetOrdinal("name");
-					int colPts = r.GetOrdinal("stat_points");
-
-					int colStr = r.GetOrdinal("strength");
-					int colBStr = r.GetOrdinal("base_strength");
-					int colLea = r.GetOrdinal("leadership");
-					int colBLea = r.GetOrdinal("base_leadership");
-					int colInt = r.GetOrdinal("intelligence");
-					int colBInt = r.GetOrdinal("base_intelligence");
-					int colPol = r.GetOrdinal("politics");
-					int colBPol = r.GetOrdinal("base_politics");
-					int colCha = r.GetOrdinal("charisma");
-					int colBCha = r.GetOrdinal("base_charisma");
-
-					long ap = r.GetInt64(colAP);
-					string rank = r.GetString(colRank);
-					int maxTroops = r.IsDBNull(colMaxT) ? 0 : r.GetInt32(colMaxT);
-					int rep = r.IsDBNull(colRep) ? 0 : r.GetInt32(colRep);
-					int wins = r.IsDBNull(colWins) ? 0 : r.GetInt32(colWins);
-					int losses = r.IsDBNull(colLoss) ? 0 : r.GetInt32(colLoss);
-					int gold = r.IsDBNull(colGold) ? 0 : r.GetInt32(colGold);
-					string factionName = r.IsDBNull(colFact) ? "Ronin" : r.GetString(colFact);
-					int maxAP = r.IsDBNull(colMaxAP) ? 3 : r.GetInt32(colMaxAP);
-					int currentTroops = r.IsDBNull(colTroops) ? 0 : r.GetInt32(colTroops);
-					string playerName = r.GetString(colName);
+					long ap = r.GetInt64(0);
+					long maxAP = r.GetInt64(1);
+					int gold = r.GetInt32(2);
+					string playerName = r.GetString(3);
+					int playerLoc = r.GetInt32(4);
+					int officerId = r.GetInt32(5);
+					_availablePoints = r.GetInt32(6);
+					_initialPoints = _availablePoints;
 
 					// Stats
-					_availablePoints = r.GetInt32(colPts);
-					_initialPoints = _availablePoints;
-					int str = r.GetInt32(colStr); int bStr = r.GetInt32(colBStr);
-					int lea = r.GetInt32(colLea); int bLea = r.GetInt32(colBLea);
-					int intel = r.GetInt32(colInt); int bIntel = r.GetInt32(colBInt);
-					int pol = r.GetInt32(colPol); int bPol = r.GetInt32(colBPol);
-					int cha = r.GetInt32(colCha); int bCha = r.GetInt32(colBCha);
+					int str = r.GetInt32(7); int bStr = r.GetInt32(8);
+					int lea = r.GetInt32(9); int bLea = r.GetInt32(10);
+					int intel = r.GetInt32(11); int bIntel = r.GetInt32(12);
+					int pol = r.GetInt32(13); int bPol = r.GetInt32(14);
+					int cha = r.GetInt32(15); int bCha = r.GetInt32(16);
 
-					// Initialize local stats
-					_initialStats["strength"] = str;
-					_initialStats["leadership"] = lea;
-					_initialStats["intelligence"] = intel;
-					_initialStats["politics"] = pol;
+					// Local tracking
+					_initialStats["strength"] = str; _initialStats["leadership"] = lea;
+					_initialStats["intelligence"] = intel; _initialStats["politics"] = pol;
 					_initialStats["charisma"] = cha;
-
 					foreach (var kvp in _initialStats) _tempStats[kvp.Key] = kvp.Value;
 
-					// Emergency Baseline Correction
-					if (bStr > str || bLea > lea || bIntel > intel || bPol > pol || bCha > cha)
+					// Populate Header
+					if (DateLabel != null) DateLabel.Text = GetDateString();
+					if (NameLabel != null) NameLabel.Text = playerName;
+					if (APLabel != null) APLabel.Text = $"AP: {ap}/{maxAP}";
+					if (GoldLabel != null) GoldLabel.Text = $"Gold: {gold}";
+
+					// TaskPopout
+					if (TaskPopoutNode != null) TaskPopoutNode.Refresh(officerId, playerLoc);
+
+					// Current City
+					if (CurrentCityPanel != null)
 					{
-						GD.PrintErr($"[HUD] Baseline mismatch detected for {playerName}. Current stats are lower than base. Syncing...");
-						using (var upConn = DatabaseHelper.GetConnection())
-						{
-							upConn.Open();
-							var fCmd = upConn.CreateCommand();
-							fCmd.CommandText = "UPDATE officers SET base_strength = strength, base_leadership = leadership, base_intelligence = intelligence, base_politics = politics, base_charisma = charisma WHERE is_player = 1";
-							fCmd.ExecuteNonQuery();
-						}
-						// Use the real stats as baselines for this frame to avoid clamping
-						bStr = Math.Min(str, bStr); bLea = Math.Min(lea, bLea); bIntel = Math.Min(intel, bIntel);
-						bPol = Math.Min(pol, bPol); bCha = Math.Min(cha, bCha);
+						CurrentCityPanel.Refresh(playerLoc);
+						PopulateCityLists(playerLoc, CurrentCityOfficers, CurrentCityActions, true);
 					}
 
-					GD.Print($"[HUD Refresh] {playerName} Stat Check: STR={str}/Base={bStr}, Pts={_availablePoints}");
+					// Stat Allocation UI
+					if (_availableLabel != null)
+					{
+						_availableLabel.Text = _availablePoints.ToString();
+						_availableLabel.Visible = _availablePoints > 0;
+					}
+					if (_rankUpLabel != null) _rankUpLabel.Visible = _availablePoints > 0;
 
-					_apLabel.Text = $"AP: {ap}/{maxAP}";
-					if (_goldLabel != null) _goldLabel.Text = $"Gold: {gold}";
-					_factionLabel.Text = $"{factionName}";
-					_rankLabel.Text = $"{rank} (Rep: {rep})";
-					_troopsLabel.Text = $"Command: {currentTroops}/{maxTroops}";
-					if (_recordLabel != null) _recordLabel.Text = $"Record: {wins}W - {losses}L";
-
-					_rankUpLabel.Visible = _availablePoints > 0;
-					_submitButton.Hide();
-
-					// Update SpinBoxes
 					UpdateSpin(_strSpin, str, bStr);
 					UpdateSpin(_leaSpin, lea, bLea);
 					UpdateSpin(_intSpin, intel, bIntel);
 					UpdateSpin(_polSpin, pol, bPol);
 					UpdateSpin(_chaSpin, cha, bCha);
 
-					_strSpin.Editable = _availablePoints > 0;
-					_leaSpin.Editable = _availablePoints > 0;
-					_intSpin.Editable = _availablePoints > 0;
-					_polSpin.Editable = _availablePoints > 0;
-					_chaSpin.Editable = _availablePoints > 0;
+					if (_strSpin != null) _strSpin.Editable = _availablePoints > 0;
+					if (_leaSpin != null) _leaSpin.Editable = _availablePoints > 0;
+					if (_intSpin != null) _intSpin.Editable = _availablePoints > 0;
+					if (_polSpin != null) _polSpin.Editable = _availablePoints > 0;
+					if (_chaSpin != null) _chaSpin.Editable = _availablePoints > 0;
 
-					_availableLabel.Text = _availablePoints.ToString();
-					_availableLabel.Visible = _availablePoints > 0;
-
-					// Reset highlights
 					ResetStatColors();
 				}
 			}
-
-			// 2. Get Date
-			var dateCmd = connection.CreateCommand();
-			dateCmd.CommandText = "SELECT current_day FROM game_state LIMIT 1";
-			var dayObj = dateCmd.ExecuteScalar();
-			long totalDays = (dayObj != null && dayObj != DBNull.Value) ? (long)dayObj : 1;
-
-			// Calculate Calendar
-			// Assuming 30 days per month, 12 months per year
-			long year = 1 + (totalDays - 1) / 360;
-			long month = 1 + ((totalDays - 1) % 360) / 30;
-			long day = 1 + ((totalDays - 1) % 30);
-
-			_dateLabel.Text = $"Year {year}, Month {month}, Day {day}";
 		}
 		_isRefreshing = false;
 	}
 
+	public void UpdateSelectedCity(int cityId)
+	{
+		if (SelectedCityPanel == null) return;
+		SelectedCityPanel.Visible = true;
+		SelectedCityPanel.Refresh(cityId);
+		PopulateCityLists(cityId, SelectedCityOfficers, SelectedCityActions, false);
+	}
+
+	public void ClearSelectedCity()
+	{
+		if (SelectedCityPanel != null) SelectedCityPanel.Visible = false;
+		if (SelectedCityOfficers != null) foreach (Node n in SelectedCityOfficers.GetChildren()) n.QueueFree();
+		if (SelectedCityActions != null) foreach (Node n in SelectedCityActions.GetChildren()) n.QueueFree();
+	}
+
+	private string GetDateString()
+	{
+		using (var conn = DatabaseHelper.GetConnection())
+		{
+			conn.Open();
+			var cmd = conn.CreateCommand();
+			cmd.CommandText = "SELECT current_day FROM game_state LIMIT 1";
+			var res = cmd.ExecuteScalar();
+			long totalDays = (res != null) ? Convert.ToInt64(res) : 1;
+			long year = 1 + (totalDays - 1) / 360;
+			long month = 1 + ((totalDays - 1) % 360) / 30;
+			long day = 1 + ((totalDays - 1) % 30);
+			return $"Year {year}, Month {month}, Day {day}";
+		}
+	}
+
+	private void PopulateCityLists(int cityId, VBoxContainer officerList, VBoxContainer actionList, bool isCurrentCity)
+	{
+		if (officerList == null || actionList == null) return;
+
+		// Clear
+		foreach (Node c in officerList.GetChildren()) c.QueueFree();
+		foreach (Node c in actionList.GetChildren()) c.QueueFree();
+
+		using (var conn = DatabaseHelper.GetConnection())
+		{
+			conn.Open();
+
+			var cmd = conn.CreateCommand();
+			cmd.CommandText = @"
+				SELECT o.name, o.rank, o.troops, f.color, o.officer_id 
+				FROM officers o
+				LEFT JOIN factions f ON o.faction_id = f.faction_id
+				WHERE o.location_id = $cid
+				ORDER BY o.rank DESC, o.name ASC";
+			cmd.Parameters.AddWithValue("$cid", cityId);
+			using (var r = cmd.ExecuteReader())
+			{
+				while (r.Read())
+				{
+					string name = r.GetString(0);
+					string rank = r.GetString(1);
+					int troops = r.GetInt32(2);
+					string color = r.IsDBNull(3) ? "#FFFFFF" : r.GetString(3);
+					int oid = r.GetInt32(4);
+
+					var btn = new Button();
+					btn.Text = $"{name} ({rank}, {troops})";
+					btn.Flat = true; // Make it look like a label but interactable
+					btn.Alignment = HorizontalAlignment.Center;
+					btn.Modulate = new Color(color);
+					btn.MouseDefaultCursorShape = CursorShape.PointingHand;
+					btn.Pressed += () => EmitSignal(SignalName.OfficerClicked, oid);
+					officerList.AddChild(btn);
+				}
+			}
+
+			// 2. Actions
+			if (isCurrentCity)
+			{
+				AddActionButton(actionList, "Develop Commerce", OnCommercePressed);
+				AddActionButton(actionList, "Cultivate Land", OnAgriculturePressed);
+				AddActionButton(actionList, "Bolster Defense", OnDefensePressed);
+				AddActionButton(actionList, "Enforce Order", OnOrderPressed);
+			}
+			else
+			{
+				AddActionButton(actionList, "Travel To", () => OnTravelToSelected(cityId));
+			}
+		}
+	}
+
+	private void AddActionButton(VBoxContainer container, string text, Action onPress)
+	{
+		var btn = new Button();
+		btn.Text = text;
+		btn.Pressed += onPress;
+		container.AddChild(btn);
+	}
+
 	private void UpdateSpin(SpinBox spin, int current, int baseline)
 	{
-		// Use the lower of the two as MinValue to prevent clamping a low stat (like 32) up to a stale baseline (like 50)
+		if (spin == null) return;
 		spin.MinValue = Math.Min(current, baseline);
-		spin.MaxValue = 100; // soft cap
+		spin.MaxValue = 100;
 		spin.Value = current;
-
-		// Clear font override initially
 		spin.GetLineEdit().AddThemeColorOverride("font_color", Colors.White);
 	}
 
 	private void ResetStatColors()
 	{
 		foreach (var label in _statLabels.Values) if (label != null) label.Modulate = Colors.White;
-		_strSpin.GetLineEdit().AddThemeColorOverride("font_color", Colors.White);
-		_leaSpin.GetLineEdit().AddThemeColorOverride("font_color", Colors.White);
-		_intSpin.GetLineEdit().AddThemeColorOverride("font_color", Colors.White);
-		_polSpin.GetLineEdit().AddThemeColorOverride("font_color", Colors.White);
-		_chaSpin.GetLineEdit().AddThemeColorOverride("font_color", Colors.White);
+		_strSpin?.GetLineEdit().AddThemeColorOverride("font_color", Colors.White);
+		_leaSpin?.GetLineEdit().AddThemeColorOverride("font_color", Colors.White);
+		_intSpin?.GetLineEdit().AddThemeColorOverride("font_color", Colors.White);
+		_polSpin?.GetLineEdit().AddThemeColorOverride("font_color", Colors.White);
+		_chaSpin?.GetLineEdit().AddThemeColorOverride("font_color", Colors.White);
 	}
 
 	private void OnStatChanged(double value, string statName)
 	{
 		if (_isRefreshing) return;
-
 		int newValue = (int)value;
 		int oldValue = _tempStats[statName];
 		int delta = newValue - oldValue;
-
-		// Validation: Can't spend more than we have
-		int totalSpent = 0;
-		foreach (var key in _initialStats.Keys) totalSpent += (_tempStats[key] - _initialStats[key]);
-
 		if (delta > 0 && (_availablePoints <= 0))
 		{
-			GD.Print("No stat points available!");
-			RefreshStatUI(statName); // Revert UI
+			RefreshStatUI(statName);
 			return;
 		}
-
 		if (delta == 0) return;
-
-		// Update local state
 		_tempStats[statName] = newValue;
 		_availablePoints -= delta;
-
-		// Update UI
 		RefreshStatUI(statName);
-		_availableLabel.Text = _availablePoints.ToString();
-		_availableLabel.Visible = _availablePoints > 0;
-
-		// Show Submit button if anything changed
+		if (_availableLabel != null) _availableLabel.Text = _availablePoints.ToString();
 		bool hasChanges = false;
 		foreach (var key in _initialStats.Keys) if (_tempStats[key] != _initialStats[key]) hasChanges = true;
-		_submitButton.Visible = hasChanges;
-
-		// If no points left, hide level up label (unless user wants it to stay until submit)
-		// User said: "If no points are left to spend, the RankUpLabel and Submit button go back to being hidden"
-		// But they also said: "once the player puts a point in a stat we have SubmitButton become visible... locked in"
-		// Interpretation: RankUpLabel hides when 0 points. SubmitButton hides after click.
-		if (_availablePoints <= 0) _rankUpLabel.Hide();
-		else _rankUpLabel.Show();
+		if (_submitButton != null) _submitButton.Visible = hasChanges;
+		if (_availablePoints <= 0) _rankUpLabel?.Hide();
+		else _rankUpLabel?.Show();
 	}
 
 	private void RefreshStatUI(string statName)
@@ -381,67 +368,43 @@ public partial class GameHUD : Control
 			case "politics": spin = _polSpin; break;
 			case "charisma": spin = _chaSpin; break;
 		}
-
 		if (spin == null) return;
-
 		int current = _tempStats[statName];
 		int initial = _initialStats[statName];
-
 		_isRefreshing = true;
 		spin.Value = current;
 		_isRefreshing = false;
-
-		bool modified = current > initial;
-		Color highlight = modified ? Colors.Green : Colors.White;
-
+		Color highlight = (current > initial) ? Colors.Green : Colors.White;
 		spin.GetLineEdit().AddThemeColorOverride("font_color", highlight);
 		if (_statLabels.ContainsKey(statName) && _statLabels[statName] != null)
-		{
 			_statLabels[statName].Modulate = highlight;
-		}
 	}
 
 	private void OnSubmitPressed()
 	{
-		using (var connection = DatabaseHelper.GetConnection())
+		using (var conn = DatabaseHelper.GetConnection())
 		{
-			connection.Open();
-			using (var transaction = connection.BeginTransaction())
-			{
-				try
-				{
-					var cmd = connection.CreateCommand();
-					cmd.Transaction = transaction;
-					cmd.CommandText = @"
-						UPDATE officers 
-						SET strength = $str, 
-							leadership = $lea, 
-							intelligence = $int, 
-							politics = $pol, 
-							charisma = $cha,
-							stat_points = $pts
-						WHERE is_player = 1";
-
-					cmd.Parameters.AddWithValue("$str", _tempStats["strength"]);
-					cmd.Parameters.AddWithValue("$lea", _tempStats["leadership"]);
-					cmd.Parameters.AddWithValue("$int", _tempStats["intelligence"]);
-					cmd.Parameters.AddWithValue("$pol", _tempStats["politics"]);
-					cmd.Parameters.AddWithValue("$cha", _tempStats["charisma"]);
-					cmd.Parameters.AddWithValue("$pts", _availablePoints);
-
-					cmd.ExecuteNonQuery();
-					transaction.Commit();
-
-					GD.Print("[HUD] Stats saved successfully.");
-				}
-				catch (Exception ex)
-				{
-					transaction.Rollback();
-					GD.PrintErr($"[HUD] Failed to save stats: {ex.Message}");
-				}
-			}
+			conn.Open();
+			var cmd = conn.CreateCommand();
+			cmd.CommandText = "UPDATE officers SET strength=$s, leadership=$l, intelligence=$i, politics=$p, charisma=$c, stat_points=$pts WHERE is_player=1";
+			cmd.Parameters.AddWithValue("$s", _tempStats["strength"]);
+			cmd.Parameters.AddWithValue("$l", _tempStats["leadership"]);
+			cmd.Parameters.AddWithValue("$i", _tempStats["intelligence"]);
+			cmd.Parameters.AddWithValue("$p", _tempStats["politics"]);
+			cmd.Parameters.AddWithValue("$c", _tempStats["charisma"]);
+			cmd.Parameters.AddWithValue("$pts", _availablePoints);
+			cmd.ExecuteNonQuery();
 		}
-
 		RefreshHUD();
 	}
+
+	// Action Stubs
+	private void OnCommercePressed() { var am = GetNode<ActionManager>("/root/ActionManager"); am.PerformDomesticAction(GetPlayerId(), GetPlayerLoc(), ActionManager.DomesticType.Commerce); RefreshHUD(); }
+	private void OnAgriculturePressed() { var am = GetNode<ActionManager>("/root/ActionManager"); am.PerformDomesticAction(GetPlayerId(), GetPlayerLoc(), ActionManager.DomesticType.Agriculture); RefreshHUD(); }
+	private void OnDefensePressed() { var am = GetNode<ActionManager>("/root/ActionManager"); am.PerformDomesticAction(GetPlayerId(), GetPlayerLoc(), ActionManager.DomesticType.Defense); RefreshHUD(); }
+	private void OnOrderPressed() { var am = GetNode<ActionManager>("/root/ActionManager"); am.PerformDomesticAction(GetPlayerId(), GetPlayerLoc(), ActionManager.DomesticType.PublicOrder); RefreshHUD(); }
+	private void OnTravelToSelected(int destId) { var am = GetNode<ActionManager>("/root/ActionManager"); am.PerformTravel(GetPlayerId(), destId); RefreshHUD(); }
+
+	private int GetPlayerId() { using (var c = DatabaseHelper.GetConnection()) { c.Open(); var cmd = c.CreateCommand(); cmd.CommandText = "SELECT officer_id FROM officers WHERE is_player=1"; return Convert.ToInt32(cmd.ExecuteScalar()); } }
+	private int GetPlayerLoc() { using (var c = DatabaseHelper.GetConnection()) { c.Open(); var cmd = c.CreateCommand(); cmd.CommandText = "SELECT location_id FROM officers WHERE is_player=1"; return Convert.ToInt32(cmd.ExecuteScalar()); } }
 }

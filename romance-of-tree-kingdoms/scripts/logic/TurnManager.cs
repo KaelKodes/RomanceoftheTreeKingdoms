@@ -82,34 +82,45 @@ public partial class TurnManager : Node
 				if (isNewWeek) EmitSignal(SignalName.NewWeekStarted);
 			}
 
-			// Strategic Logic only on New Weeks
-			if (isNewWeek)
+			// AI Strategic Logic
+			var ai = GetNode<FactionAI>("/root/FactionAI");
+			using (var conn = DatabaseHelper.GetConnection())
 			{
-				// AI Strategic Refresh & Repositioning
-				var ai = GetNode<FactionAI>("/root/FactionAI");
-				using (var conn = DatabaseHelper.GetConnection())
+				conn.Open();
+				var cmd = conn.CreateCommand();
+				cmd.CommandText = "SELECT faction_id FROM factions";
+				var fids = new List<int>();
+				using (var r = cmd.ExecuteReader())
 				{
-					conn.Open();
-					var cmd = conn.CreateCommand();
-					cmd.CommandText = "SELECT faction_id FROM factions";
-					var fids = new List<int>();
-					using (var r = cmd.ExecuteReader())
-					{
-						while (r.Read()) fids.Add(r.GetInt32(0));
-					}
+					while (r.Read()) fids.Add(r.GetInt32(0));
+				}
 
-					// Monthly Cycle (approx 4 weeks)
+				if (isNewWeek)
+				{
+					// Monthly Finance
 					if (currentDay == 1 || (currentDay - 1) % 28 == 0)
 					{
-						GD.Print("[TurnManager] NEW MONTH! Refreshing Strategic Goals...");
-						foreach (int fid in fids) ai.UpdateMonthlyGoal(conn, fid);
+						foreach (int fid in fids) ai.ProcessMonthlyFinances(conn, fid);
 					}
 
-					GD.Print("[TurnManager] NEW WEEK! Refreshing Weekly Tasks & Repositioning...");
+					GD.Print("[TurnManager] Stage 1: Preparation...");
 					foreach (int fid in fids)
 					{
-						ai.UpdateWeeklyTask(conn, fid);
+						// Evaluation
+						var cities = ai.GetCityIdsByFaction(conn, fid);
+						foreach (var cid in cities) ai.PerformPrefectEvaluation(conn, cid);
+
+						ai.EnsureGoalsExist(conn, fid);
 						ai.RepositionOfficers(conn, fid);
+						ai.PerformStage1Prep(conn, fid);
+					}
+				}
+				else
+				{
+					// Stage 2: Execution
+					foreach (int fid in fids)
+					{
+						ai.PerformStage2Execution(conn, fid);
 					}
 				}
 			}
@@ -436,7 +447,7 @@ public partial class TurnManager : Node
             var worldMap = GetTree().Root.FindChild("WorldMap", true, false) as WorldMap;
             if (IsInstanceValid(worldMap))
             {
-                worldMap.CityMenuDialog?.Hide();
+                worldMap.HUD?.ClearSelectedCity();
                 worldMap.OfficerCardDialog?.Hide();
             }
 
@@ -599,54 +610,98 @@ public partial class TurnManager : Node
         ExecuteSql(conn, "UPDATE officers SET merit_score = 0");
     }
 
-    private void ProcessMonthlyEconomics(SqliteConnection conn)
+    private void ProcessDailyRevoltCheck(SqliteConnection conn)
     {
-        GD.Print("[Logistics] Monthly Economics (Taxes & Salaries)...");
+        // Public Revolt: PO < 20. Public Unrest: PO < 40.
+		// We'll use the public_order column directly in queries, but we can set 
+		// a conceptual status if we had a column. Since we unified PO, we just check PO.
+	}
 
-        // 1. Collect Taxes into Faction Treasury
-        // Formula: City Commerce * Faction Tax Rate
-        ExecuteSql(conn, @"
+	private void ProcessAutoDraft(SqliteConnection conn)
+	{
+		GD.Print("[Logistics] Processing Auto-Draft...");
+		// Formula: Draft = (Population / 50) * (Public Order / 100)
+		// Cities in Revolt (PO < 20) get 0.
+		ExecuteSql(conn, @"
+            UPDATE officers SET troops = MIN(max_troops, troops + (
+                SELECT (c.draft_population / 50) * (c.public_order / 100.0)
+                FROM cities c
+                WHERE c.city_id = officers.location_id
+                AND c.public_order >= 20
+            ))
+			WHERE faction_id > 0 AND troops < max_troops");
+	}
+
+	private void ProcessMonthlyEconomics(SqliteConnection conn)
+	{
+		GD.Print("[Logistics] Monthly Economics (Taxes & Salaries)...");
+
+		// 1. Collect Taxes into Faction Treasury
+		// Formula: City Commerce * (Public Order / 100.0)
+		// Revolting cities (PO < 20) generate 0.
+		ExecuteSql(conn, @"
             UPDATE factions SET gold_treasury = gold_treasury + (
-                SELECT SUM(c.commerce * f.tax_rate) 
-                FROM cities c, factions f
-                WHERE c.faction_id = f.faction_id 
-                AND f.faction_id = factions.faction_id
+                SELECT SUM(CASE WHEN c.public_order < 20 THEN 0 ELSE c.commerce * (c.public_order / 100.0) END)
+                FROM cities c
+                WHERE c.faction_id = factions.faction_id
             )
 			WHERE faction_id IN (SELECT DISTINCT faction_id FROM cities)");
 
-        // 2. Pay Salaries (Deduct from Treasury) - Base 100 gold per officer
-        ExecuteSql(conn, @"
+		// 2. Pay Salaries (Deduct from Treasury) - Scales by Rank Level
+		// Rank Levels: 0=0, 1=50, 2=80, 3=120, 4=200, 5=300, 6=450, 7=600, 8=800, 9=1000, 10=1500
+		// We can approximate this as: 50 * level^1.3 or just a hardcoded mapping in SQL if possible, 
+		// but easier to do a procedural update or a CASE statement.
+		ExecuteSql(conn, @"
             UPDATE factions SET gold_treasury = gold_treasury - (
-                SELECT COUNT(*) * 100 
+                SELECT SUM(
+                    CASE 
+						WHEN o.rank = '" + GameConstants.RANK_VOLUNTEER + @"' THEN 0
+						WHEN o.rank = '" + GameConstants.RANK_RECRUIT + @"' THEN 50
+						WHEN o.rank = '" + GameConstants.RANK_SOLDIER + @"' THEN 80
+						WHEN o.rank = '" + GameConstants.RANK_VETERAN + @"' THEN 120
+						WHEN o.rank = '" + GameConstants.RANK_SERGEANT + @"' THEN 200
+						WHEN o.rank = '" + GameConstants.RANK_LIEUTENANT + @"' THEN 300
+						WHEN o.rank = '" + GameConstants.RANK_CAPTAIN + @"' THEN 450
+						WHEN o.rank = '" + GameConstants.RANK_MAJOR + @"' THEN 600
+						WHEN o.rank = '" + GameConstants.RANK_GENERAL + @"' THEN 800
+						WHEN o.rank = '" + GameConstants.RANK_COMMANDER + @"' THEN 1000
+						WHEN o.rank = '" + GameConstants.RANK_SOVEREIGN + @"' THEN 1500
+                        ELSE 50 
+                    END
+                )
                 FROM officers o 
                 WHERE o.faction_id = factions.faction_id
 			)");
 
-        // Check for Bankruptcy: If gold_treasury < 0, satisfaction drops
-        ExecuteSql(conn, @"
+		// Check for Bankruptcy: If gold_treasury < 0, satisfaction drops
+		ExecuteSql(conn, @"
             UPDATE officers 
             SET satisfaction = satisfaction - 20 
 			WHERE faction_id IN (SELECT faction_id FROM factions WHERE gold_treasury < 0)");
-    }
 
-    private void ProcessQuarterlyHarvest(SqliteConnection conn)
-    {
-        GD.Print("[Logistics] Quarterly Harvest (Supplies)...");
-        ExecuteSql(conn, @"
+		// Monthly Auto-Draft
+		ProcessAutoDraft(conn);
+	}
+
+	private void ProcessQuarterlyHarvest(SqliteConnection conn)
+	{
+		GD.Print("[Logistics] Quarterly Harvest (Supplies)...");
+		// Formula: Agriculture * 10 * (Public Order / 100.0)
+		ExecuteSql(conn, @"
             UPDATE factions SET supplies = supplies + (
-                SELECT SUM(agriculture * 10) 
-                FROM cities 
-                WHERE cities.faction_id = factions.faction_id
+                SELECT SUM(CASE WHEN c.public_order < 20 THEN 0 ELSE c.agriculture * 10 * (c.public_order / 100.0) END) 
+                FROM cities c
+                WHERE c.faction_id = factions.faction_id
             )
 			WHERE faction_id IN (SELECT DISTINCT faction_id FROM cities)");
-    }
+	}
 
-    private void ExecuteSql(SqliteConnection conn, string sql)
-    {
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = sql;
-            cmd.ExecuteNonQuery();
-        }
-    }
+	private void ExecuteSql(SqliteConnection conn, string sql)
+	{
+		using (var cmd = conn.CreateCommand())
+		{
+			cmd.CommandText = sql;
+			cmd.ExecuteNonQuery();
+		}
+	}
 }

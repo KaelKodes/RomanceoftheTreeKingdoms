@@ -101,6 +101,14 @@ public partial class CouncilUI : Control
         missionBtn.AddItem("Science");
         missionBtn.AddItem("Defense");
         missionBtn.AddItem("Order");
+        missionBtn.AddItem("Inquire");
+        missionBtn.AddItem("Security");
+        missionBtn.AddItem("Conscription");
+        missionBtn.AddItem("Training");
+        missionBtn.AddItem("Invasion");
+        missionBtn.AddItem("Plotting");
+        missionBtn.AddItem("Personnel");
+        missionBtn.AddItem("Logistics");
 
         // Select current
         for (int i = 0; i < missionBtn.ItemCount; i++)
@@ -110,6 +118,10 @@ public partial class CouncilUI : Control
 
         missionBtn.ItemSelected += (index) => OnMissionSelected(oid, missionBtn.GetItemText((int)index));
         row.AddChild(missionBtn);
+
+        var troopBtn = new Button { Text = "Troops", CustomMinimumSize = new Vector2(60, 0) };
+        troopBtn.Pressed += () => OnTroopButtonPressed(oid);
+        row.AddChild(troopBtn);
 
         OfficerContainer.AddChild(row);
     }
@@ -149,6 +161,34 @@ public partial class CouncilUI : Control
             cmd.ExecuteNonQuery();
         }
         GD.Print($"Tax Rate updated to {value}%");
+    }
+
+    private void OnTroopButtonPressed(int oid)
+    {
+        // Simple Cycle for now: Tier 1 -> Tier 2 -> Tier 3 -> Tier 1
+        // In a full implementation, this could open a sub-menu.
+        using (var conn = DatabaseHelper.GetConnection())
+        {
+            conn.Open();
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT main_troop_type, troop_tier FROM officers WHERE officer_id = $oid";
+            cmd.Parameters.AddWithValue("$oid", oid);
+            using (var r = cmd.ExecuteReader())
+            {
+                if (r.Read())
+                {
+                    int typeIdx = r.IsDBNull(0) ? 1 : r.GetInt32(0);
+                    int tier = r.IsDBNull(1) ? 1 : r.GetInt32(1);
+
+                    TroopType type = (TroopType)(typeIdx - 1);
+                    int nextTier = (tier % 3) + 1;
+
+                    r.Close();
+                    ActionManager.Instance.PerformTroopOutfitting(oid, type, nextTier);
+                    LoadData(); // Refresh UI
+                }
+            }
+        }
     }
 
     private void OnClosePressed()

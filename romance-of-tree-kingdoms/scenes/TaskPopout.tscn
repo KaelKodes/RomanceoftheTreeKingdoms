@@ -1,0 +1,66 @@
+[gd_scene load_steps=2 format=3 uid="uid://d1d1d1d1d1d1d"]
+
+[ext_resource type="Script" uid="uid://kju1kg6rikad" path="res://scripts/ui/TaskPopout.cs" id="1_script"]
+
+[node name="TaskPopout" type="Control" node_paths=PackedStringArray("CityTaskLabel", "OfficerTaskLabel", "ToggleButton", "ContentPanel")]
+layout_mode = 3
+anchors_preset = 0
+size_flags_horizontal = 0
+script = ExtResource("1_script")
+CityTaskLabel = NodePath("Content/Margin/VBox/CityTask/Label")
+OfficerTaskLabel = NodePath("Content/Margin/VBox/OfficerTask/Label")
+ToggleButton = NodePath("Toggle")
+ContentPanel = NodePath("Content")
+
+[node name="Toggle" type="Button" parent="."]
+layout_mode = 0
+offset_right = 20.0
+offset_bottom = 100.0
+text = ">"
+
+[node name="Content" type="PanelContainer" parent="."]
+layout_mode = 0
+offset_left = 25.0
+offset_right = 150.0
+offset_bottom = 100.0
+
+[node name="Margin" type="MarginContainer" parent="Content"]
+layout_mode = 2
+theme_override_constants/margin_left = 5
+theme_override_constants/margin_top = 5
+theme_override_constants/margin_right = 5
+theme_override_constants/margin_bottom = 5
+
+[node name="VBox" type="VBoxContainer" parent="Content/Margin"]
+layout_mode = 2
+
+[node name="CityTask" type="VBoxContainer" parent="Content/Margin/VBox"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="Content/Margin/VBox/CityTask"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "City Task:"
+
+[node name="Value" type="Label" parent="Content/Margin/VBox/CityTask"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "None"
+autowrap_mode = 2
+
+[node name="HSeparator" type="HSeparator" parent="Content/Margin/VBox"]
+layout_mode = 2
+
+[node name="OfficerTask" type="VBoxContainer" parent="Content/Margin/VBox"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="Content/Margin/VBox/OfficerTask"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "Officer Task:"
+
+[node name="Value" type="Label" parent="Content/Margin/VBox/OfficerTask"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "None"
+autowrap_mode = 2

@@ -12,7 +12,7 @@ public partial class CityMenu : Control
 
 	// UI References
 	[Export] public Label TitleLabel { get; set; }
-	[Export] public Label InfoLabel { get; set; }
+	[Export] public RichTextLabel InfoLabel { get; set; }
 	[Export] public Label OfficersHeader { get; set; }
 	[Export] public ScrollContainer OfficerScroll { get; set; }
 	[Export] public VBoxContainer OfficerContainer { get; set; }
@@ -74,7 +74,7 @@ public partial class CityMenu : Control
                     TitleLabel.AddThemeColorOverride("font_color", new Color(fColor));
                     if (isContested) TitleLabel.Text += " [WARZONE]";
 
-                    InfoLabel.Text = $"Merchant: {econ} | Farm: {agric} | Def: {def}\nTech: {tech} | Order: {order}";
+                    InfoLabel.Text = $"[center][hint=Money (Commerce)]M[/hint]: {econ} | [hint=Food (Agriculture)]F[/hint]: {agric} | [hint=Defense]D[/hint]: {def} | [hint=Technology]T[/hint]: {tech}\n[hint=Citizen Satisfaction / Order]Public Order[/hint]: {order}[/center]";
 
                     SetupActions(isContested);
                 }
@@ -199,7 +199,8 @@ public partial class CityMenu : Control
                 AddActionButton("Develop Commerce (Pol)", OnCommercePressed);
                 AddActionButton("Cultivate Land (Pol)", OnAgriculturePressed);
                 AddActionButton("Bolster Defense (Lea)", OnDefensePressed);
-                AddActionButton("Patrol / Order (Str)", OnPublicOrderPressed);
+                AddActionButton("Enforce Order (Gov)", OnPublicOrderPressed);
+                AddActionButton("Inquire / Improve Attitude (Cha)", OnInquirePressed);
                 AddActionButton("Research (Int)", OnTechnologyPressed);
 
                 // Wisdom / Personal Actions
@@ -364,6 +365,15 @@ public partial class CityMenu : Control
     public void OnDefensePressed() { PerformDomestic(ActionManager.DomesticType.Defense); }
     public void OnPublicOrderPressed() { PerformDomestic(ActionManager.DomesticType.PublicOrder); }
     public void OnTechnologyPressed() { PerformDomestic(ActionManager.DomesticType.Technology); }
+
+    public void OnInquirePressed()
+    {
+        var actionMgr = GetNode<ActionManager>("/root/ActionManager");
+        int playerId = GetPlayerId();
+        int cityId = GetCityId(_cityName);
+        actionMgr.PerformInquireAction(playerId, cityId);
+        RefreshData();
+    }
 
     private void PerformDomestic(ActionManager.DomesticType type)
     {

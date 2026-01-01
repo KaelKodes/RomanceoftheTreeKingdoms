@@ -11,9 +11,9 @@ public partial class WorldMap : Control
 	// In a full game, these would be in the DB or a separate JSON layout file.
 	[Export] public Control CityContainer { get; set; }
 	[Export] public GameHUD HUD { get; set; }
-	[Export] public CityMenu CityMenuDialog { get; set; }
 	[Export] public OfficerCard OfficerCardDialog { get; set; }
 	[Export] public RouteOverlay RouteOverlayNode { get; set; }
+	[Export] public CouncilUI CouncilUIDialog { get; set; }
 
 	// Keep track of buttons to update them later
 	private Dictionary<string, Button> _cityButtons = new Dictionary<string, Button>();
@@ -68,12 +68,8 @@ public partial class WorldMap : Control
 		{
 			if (mb.Pressed && mb.ButtonIndex == MouseButton.Left)
 			{
-				// If background is clicked, hide menu
-				if (CityMenuDialog != null && CityMenuDialog.Visible)
-				{
-					CityMenuDialog.Hide();
-					UpdateCityVisuals(); // Refresh state
-				}
+				// If background is clicked, clear selected city
+				HUD?.ClearSelectedCity();
 			}
 			// Spacing Spread
 			else if (mb.ButtonIndex == MouseButton.WheelUp)
@@ -106,14 +102,12 @@ public partial class WorldMap : Control
 	{
 		// 1. HUD is in scene
 		if (HUD == null) GD.PrintErr("HUD not linked in WorldMap!");
+		else
+		{
+			HUD.OfficerClicked += ShowOfficerCard;
+		}
 
 		// 2. Wire up Dialogs
-		if (CityMenuDialog != null)
-		{
-			CityMenuDialog.Hide(); // Ensure hidden on start
-			CityMenuDialog.OfficerSelected += ShowOfficerCard;
-			CityMenuDialog.InteractionEnded += OnMenuClosed;
-		}
 
 		if (OfficerCardDialog != null)
 		{
@@ -143,6 +137,7 @@ public partial class WorldMap : Control
 		{
 			turnMgr.TurnStarted += OnTurnStarted;
 			turnMgr.TurnEnded += UpdateCityVisuals;
+			turnMgr.CouncilTriggered += OnCouncilTriggered;
 		}
 
 		// 5. Capture Initial Positions and Calc Centroid
@@ -163,13 +158,26 @@ public partial class WorldMap : Control
 		if (!isPlayer)
 		{
 			// Close menus if AI turn starts (prevents race conditions)
-			CityMenuDialog?.Hide();
 			OfficerCardDialog?.Hide();
+		}
+	}
+
+	private void OnCouncilTriggered(int factionId, int cityId, int cpAmount)
+	{
+		GD.Print($"[WorldMap] Council Triggered! Faction: {factionId}, City: {cityId}, CP: {cpAmount}");
+		if (CouncilUIDialog != null)
+		{
+			CouncilUIDialog.Open(factionId, cityId, cpAmount);
+		}
+		else
+		{
+			GD.PrintErr("CouncilUIDialog not linked in WorldMap!");
 		}
 	}
 
 	public override void _ExitTree()
 	{
+		if (HUD != null) HUD.OfficerClicked -= ShowOfficerCard;
 		var actionMgr = GetNodeOrNull<ActionManager>("/root/ActionManager");
 		if (actionMgr != null)
 		{
@@ -339,9 +347,25 @@ public partial class WorldMap : Control
 
 	private void OpenCityMenu(string cityName)
 	{
-		if (CityMenuDialog == null) return;
-		CityMenuDialog.Init(cityName);
-		CityMenuDialog.Show();
+		int cityId = GetCityId(cityName);
+		if (cityId != -1 && HUD != null)
+		{
+			HUD.UpdateSelectedCity(cityId);
+		}
+	}
+
+	private int GetCityId(string name)
+	{
+		string dbPath = System.IO.Path.Combine(ProjectSettings.GlobalizePath("res://"), "../tree_kingdoms.db");
+		using (var conn = new SqliteConnection($"Data Source={dbPath}"))
+		{
+			conn.Open();
+			var cmd = conn.CreateCommand();
+			cmd.CommandText = "SELECT city_id FROM cities WHERE name = $name";
+			cmd.Parameters.AddWithValue("$name", name);
+			var res = cmd.ExecuteScalar();
+			return res != null ? (int)(long)res : -1;
+		}
 	}
 
 	private void ShowOfficerCard(int officerId)

@@ -1,0 +1,127 @@
+[gd_scene load_steps=2 format=3 uid="uid://b8x8u8u8u8u8u"]
+
+[ext_resource type="Script" uid="uid://d2ajkxtsed3wo" path="res://scripts/ui/CityInfoPanel.cs" id="1_script"]
+
+[node name="CityInfoPanel" type="PanelContainer" node_paths=PackedStringArray("NameLabel", "XButton", "YButton", "FactionLabel", "GovLabel", "TactLabel", "OfficersLabel", "RoninLabel", "GoldLabel", "SuppliesLabel", "TroopsLabel", "PopLabel", "DevPanel", "DevToggleButton", "DevStatsLabel")]
+custom_minimum_size = Vector2(250, 0)
+offset_right = 250.0
+offset_bottom = 200.0
+script = ExtResource("1_script")
+NameLabel = NodePath("Margin/VBox/TitleBar/NameLabel")
+XButton = NodePath("Margin/VBox/TitleBar/XButton")
+YButton = NodePath("Margin/VBox/TitleBar/YButton")
+FactionLabel = NodePath("Margin/VBox/MainStats/Left/FactionLabel")
+GovLabel = NodePath("Margin/VBox/MainStats/Left/GovLabel")
+TactLabel = NodePath("Margin/VBox/MainStats/Left/TactLabel")
+OfficersLabel = NodePath("Margin/VBox/MainStats/Left/OfficersLabel")
+RoninLabel = NodePath("Margin/VBox/MainStats/Left/RoninLabel")
+GoldLabel = NodePath("Margin/VBox/MainStats/Right/GoldLabel")
+SuppliesLabel = NodePath("Margin/VBox/MainStats/Right/SuppliesLabel")
+TroopsLabel = NodePath("Margin/VBox/MainStats/Right/TroopsLabel")
+PopLabel = NodePath("Margin/VBox/MainStats/Right/PopLabel")
+DevPanel = NodePath("Margin/VBox/DevContainer")
+DevToggleButton = NodePath("Margin/VBox/DevToggle")
+DevStatsLabel = NodePath("Margin/VBox/DevContainer/DevStatsLabel")
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 5
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 5
+
+[node name="VBox" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="TitleBar" type="HBoxContainer" parent="Margin/VBox"]
+layout_mode = 2
+
+[node name="NameLabel" type="Label" parent="Margin/VBox/TitleBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "City Name"
+horizontal_alignment = 1
+
+[node name="XButton" type="Button" parent="Margin/VBox/TitleBar"]
+visible = false
+layout_mode = 2
+text = "X"
+
+[node name="YButton" type="Button" parent="Margin/VBox/TitleBar"]
+visible = false
+layout_mode = 2
+text = "Y"
+
+[node name="HSeparator" type="HSeparator" parent="Margin/VBox"]
+layout_mode = 2
+
+[node name="MainStats" type="HBoxContainer" parent="Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="Left" type="VBoxContainer" parent="Margin/VBox/MainStats"]
+layout_mode = 2
+
+[node name="FactionLabel" type="Label" parent="Margin/VBox/MainStats/Left"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Faction: -"
+
+[node name="GovLabel" type="Label" parent="Margin/VBox/MainStats/Left"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Gov: -"
+
+[node name="TactLabel" type="Label" parent="Margin/VBox/MainStats/Left"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Tactician: -"
+
+[node name="OfficersLabel" type="Label" parent="Margin/VBox/MainStats/Left"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Officers: -"
+
+[node name="RoninLabel" type="Label" parent="Margin/VBox/MainStats/Left"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Ronin: -"
+
+[node name="Right" type="VBoxContainer" parent="Margin/VBox/MainStats"]
+layout_mode = 2
+
+[node name="GoldLabel" type="Label" parent="Margin/VBox/MainStats/Right"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Gold: -"
+
+[node name="SuppliesLabel" type="Label" parent="Margin/VBox/MainStats/Right"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Supplies: -"
+
+[node name="TroopsLabel" type="Label" parent="Margin/VBox/MainStats/Right"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Troops: -"
+
+[node name="PopLabel" type="Label" parent="Margin/VBox/MainStats/Right"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Population: -"
+
+[node name="DevToggle" type="Button" parent="Margin/VBox"]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "▼"
+
+[node name="DevContainer" type="PanelContainer" parent="Margin/VBox"]
+layout_mode = 2
+
+[node name="DevStatsLabel" type="RichTextLabel" parent="Margin/VBox/DevContainer"]
+layout_mode = 2
+bbcode_enabled = true
+text = "[center]Dev Stats[/center]"
+fit_content = true
+autowrap_mode = 0

@@ -108,16 +108,19 @@ layout_mode = 2
 text = "Wins"
 horizontal_alignment = 1
 
-[node name="StatsLabel" type="Label" parent="Panel/MarginContainer/VBoxContainer"]
+[node name="StatsLabel" type="RichTextLabel" parent="Panel/MarginContainer/VBoxContainer"]
 layout_mode = 2
+bbcode_enabled = true
 text = "Stats"
-horizontal_alignment = 1
+fit_content = true
+autowrap_mode = 0
 
-[node name="SkillsLabel" type="Label" parent="Panel/MarginContainer/VBoxContainer"]
+[node name="SkillsLabel" type="RichTextLabel" parent="Panel/MarginContainer/VBoxContainer"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.701961, 1, 0.701961, 1)
+theme_override_colors/default_color = Color(0.701961, 1, 0.701961, 1)
+bbcode_enabled = true
 text = "Skills"
-horizontal_alignment = 1
+fit_content = true
 autowrap_mode = 2
 
 [node name="ActionContainer" type="VBoxContainer" parent="Panel/MarginContainer/VBoxContainer"]

@@ -1,17 +1,16 @@
-[gd_scene load_steps=9 format=3 uid="uid://dwugi78t27gm6"]
+[gd_scene load_steps=8 format=3 uid="uid://dwugi78t27gm6"]
 
 [ext_resource type="Script" uid="uid://hp4jvkoapyjc" path="res://scripts/ui/WorldMap.cs" id="1_ej7nn"]
 [ext_resource type="PackedScene" uid="uid://ddm416ose46sn" path="res://scenes/GameHUD.tscn" id="2_gamehud"]
-[ext_resource type="PackedScene" uid="uid://bg5jcwfwgwffq" path="res://scenes/CityMenu.tscn" id="3_citymenu"]
-[ext_resource type="PackedScene" uid="uid://cegg47gwprlmd" path="res://scenes/OfficerCard.tscn" id="4_officercard"]
-[ext_resource type="Texture2D" uid="uid://broyve1ljtfsf" path="res://assets/art/MapBKG.png" id="5_0laof"]
-[ext_resource type="Script" uid="uid://cxvgdffqwg631" path="res://scripts/ui/RouteOverlay.cs" id="6_routeoverlay"]
+[ext_resource type="PackedScene" uid="uid://cegg47gwprlmd" path="res://scenes/OfficerCard.tscn" id="3_officercard"]
+[ext_resource type="Texture2D" uid="uid://broyve1ljtfsf" path="res://assets/art/MapBKG.png" id="4_0laof"]
+[ext_resource type="Script" uid="uid://cxvgdffqwg631" path="res://scripts/ui/RouteOverlay.cs" id="5_routeoverlay"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_jsexe"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_05f3n"]
 
-[node name="WorldMap" type="Control" node_paths=PackedStringArray("CityContainer", "HUD", "CityMenuDialog", "OfficerCardDialog", "RouteOverlayNode")]
+[node name="WorldMap" type="Control" node_paths=PackedStringArray("CityContainer", "HUD", "OfficerCardDialog", "RouteOverlayNode")]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -21,7 +20,6 @@ grow_vertical = 2
 script = ExtResource("1_ej7nn")
 CityContainer = NodePath("MarginContainer/CityContainer")
 HUD = NodePath("UI_Layer/GameHUD")
-CityMenuDialog = NodePath("UI_Layer/CityMenu")
 OfficerCardDialog = NodePath("UI_Layer/OfficerCard")
 RouteOverlayNode = NodePath("RouteOverlay")
 
@@ -33,7 +31,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-texture = ExtResource("5_0laof")
+texture = ExtResource("4_0laof")
 expand_mode = 1
 
 [node name="RouteOverlay" type="Control" parent="."]
@@ -44,16 +42,19 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-script = ExtResource("6_routeoverlay")
+script = ExtResource("5_routeoverlay")
 
 [node name="MarginContainer" type="MarginContainer" parent="."]
 layout_mode = 1
 anchors_preset = -1
-anchor_top = 0.047839507
-anchor_bottom = 0.047839507
+anchor_left = 0.09427083
+anchor_top = 0.06574074
+anchor_right = 0.09427083
+anchor_bottom = 0.06574074
 offset_left = 164.0
 offset_right = 829.0
 offset_bottom = 623.0
+scale = Vector2(1.6599883, 1.5145302)
 metadata/_edit_use_anchors_ = true
 
 [node name="CityContainer" type="Control" parent="MarginContainer"]
@@ -61,90 +62,90 @@ layout_mode = 2
 
 [node name="CityContainer#Sun Capital" type="Button" parent="MarginContainer/CityContainer"]
 layout_mode = 0
-offset_left = 390.0
-offset_top = 284.0
-offset_right = 486.0
-offset_bottom = 324.0
+offset_left = 310.84558
+offset_top = 288.5383
+offset_right = 406.84558
+offset_bottom = 328.5383
 text = "Sun Capital"
 
 [node name="CityContainer#Ironhold" type="Button" parent="MarginContainer/CityContainer"]
 layout_mode = 0
-offset_left = 367.0
-offset_top = 55.0
-offset_right = 447.0
-offset_bottom = 95.0
+offset_left = 347.5928
+offset_top = 61.405167
+offset_right = 427.5928
+offset_bottom = 101.40517
 text = "Ironhold"
 
 [node name="CityContainer#Eldershade" type="Button" parent="MarginContainer/CityContainer"]
 layout_mode = 0
-offset_left = 205.0
-offset_top = 402.0
-offset_right = 299.0
-offset_bottom = 442.0
+offset_left = 192.77245
+offset_top = 425.87463
+offset_right = 286.77246
+offset_bottom = 465.87463
 text = "Eldershade"
 
 [node name="CityContainer#Tiger Gate" type="Button" parent="MarginContainer/CityContainer"]
 layout_mode = 0
-offset_left = 310.0
-offset_top = 179.0
-offset_right = 398.0
-offset_bottom = 219.0
+offset_left = 303.6166
+offset_top = 196.7607
+offset_right = 391.6166
+offset_bottom = 236.7607
 text = "Tiger Gate"
 
 [node name="CityContainer#River Port" type="Button" parent="MarginContainer/CityContainer"]
 layout_mode = 0
-offset_left = 446.0
-offset_top = 396.0
-offset_right = 531.0
-offset_bottom = 436.0
+offset_left = 446.99112
+offset_top = 386.91867
+offset_right = 531.9911
+offset_bottom = 426.91867
 text = "River Port"
 
 [node name="CityContainer#Twin Peaks" type="Button" parent="MarginContainer/CityContainer"]
 layout_mode = 0
-offset_left = 198.0
-offset_top = 100.0
-offset_right = 293.0
-offset_bottom = 140.0
+offset_left = 179.51935
+offset_top = 94.41871
+offset_right = 274.51935
+offset_bottom = 134.4187
 text = "Twin Peaks"
 
 [node name="CityContainer#Central Plains" type="Button" parent="MarginContainer/CityContainer"]
 layout_mode = 0
-offset_left = 165.0
-offset_top = 262.0
-offset_right = 280.0
-offset_bottom = 302.0
+offset_left = 122.29002
+offset_top = 268.06992
+offset_right = 237.29002
+offset_bottom = 308.06992
 text = "Central Plains"
 
 [node name="CityContainer#West Hills" type="Button" parent="MarginContainer/CityContainer"]
 layout_mode = 0
-offset_left = 41.0
-offset_top = 183.0
-offset_right = 125.0
-offset_bottom = 223.0
+offset_left = 9.638632
+offset_top = 157.80469
+offset_right = 93.63863
+offset_bottom = 197.80469
 text = "West Hills"
 
 [node name="CityContainer#Eastern Bay" type="Button" parent="MarginContainer/CityContainer"]
 layout_mode = 0
-offset_left = 582.0
-offset_top = 243.0
-offset_right = 682.0
-offset_bottom = 283.0
+offset_left = 583.7391
+offset_top = 201.3826
+offset_right = 683.7391
+offset_bottom = 241.3826
 text = "Eastern Bay"
 
 [node name="CityContainer#Mistwood" type="Button" parent="MarginContainer/CityContainer"]
 layout_mode = 0
-offset_left = -12.0
-offset_top = 353.0
-offset_right = 72.0
-offset_bottom = 393.0
+offset_left = -33.13276
+offset_top = 301.74374
+offset_right = 50.86724
+offset_bottom = 341.74374
 text = "Mistwood"
 
 [node name="CityContainer#South Fields" type="Button" parent="MarginContainer/CityContainer"]
 layout_mode = 0
-offset_left = 131.0
-offset_top = 493.0
-offset_right = 233.0
-offset_bottom = 533.0
+offset_left = 74.69931
+offset_top = 501.8058
+offset_right = 176.69931
+offset_bottom = 541.8058
 text = "South Fields"
 
 [node name="UI_Layer" type="CanvasLayer" parent="."]
@@ -154,20 +155,8 @@ offset_left = 9.0
 offset_top = 5.0
 offset_right = 9.0
 offset_bottom = 5.0
-mouse_filter = 2
 
-[node name="CityMenu" parent="UI_Layer" instance=ExtResource("3_citymenu")]
-custom_minimum_size = Vector2(250, 0)
-anchors_preset = -1
-anchor_left = 0.83000004
-anchor_right = 0.83000004
-offset_left = -108.160034
-offset_top = -3.0
-offset_right = 175.83997
-offset_bottom = 648.0
-size_flags_vertical = 0
-
-[node name="OfficerCard" parent="UI_Layer" instance=ExtResource("4_officercard")]
+[node name="OfficerCard" parent="UI_Layer" instance=ExtResource("3_officercard")]
 visible = false
 theme_override_styles/embedded_border = SubResource("StyleBoxEmpty_jsexe")
 theme_override_styles/embedded_unfocused_border = SubResource("StyleBoxEmpty_05f3n")

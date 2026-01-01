@@ -330,6 +330,90 @@ public partial class ActionManager : Node
 		}
 	}
 
+	public bool PerformTroopOutfitting(int officerId, TroopType type, int tier)
+	{
+		var data = TroopDataManager.GetTroopData(type, tier);
+		if (data == null) return false;
+
+		using (var conn = DatabaseHelper.GetConnection())
+		{
+			conn.Open();
+			// 1. Get Officer/City Info
+			var infoCmd = conn.CreateCommand();
+			infoCmd.CommandText = @"
+				SELECT o.faction_id, c.city_id, c.technology, f.gold_treasury, o.troops
+				FROM officers o
+				JOIN cities c ON o.location_id = c.city_id
+				LEFT JOIN factions f ON o.faction_id = f.faction_id
+				WHERE o.officer_id = $oid";
+			infoCmd.Parameters.AddWithValue("$oid", officerId);
+
+			int factionId = 0, cityId = 0, tech = 0, gold = 0, troops = 0;
+			using (var r = infoCmd.ExecuteReader())
+			{
+				if (r.Read())
+				{
+					factionId = r.IsDBNull(0) ? 0 : r.GetInt32(0);
+					cityId = r.GetInt32(1);
+					tech = r.GetInt32(2);
+					gold = r.IsDBNull(3) ? 0 : r.GetInt32(3);
+					troops = r.GetInt32(4);
+				}
+				else return false;
+			}
+
+			// 2. Checks
+			if (tech < data.TechRequirement)
+			{
+				GD.Print($"[ActionManager] Outfitting Failed: Tech too low ({tech} < {data.TechRequirement})");
+				return false;
+			}
+
+			float cost = TroopDataManager.CalculateOutfittingCost(type, tier, troops);
+			if (gold < (int)cost)
+			{
+				GD.Print($"[ActionManager] Outfitting Failed: Insufficient Gold ({gold} < {cost})");
+				return false;
+			}
+
+			// 3. Execute
+			using (var trans = conn.BeginTransaction())
+			{
+				try
+				{
+					// Deduct Gold from Faction
+					var goldCmd = conn.CreateCommand();
+					goldCmd.CommandText = "UPDATE factions SET gold_treasury = gold_treasury - $cost WHERE faction_id = $fid";
+					goldCmd.Parameters.AddWithValue("$cost", (int)cost);
+					goldCmd.Parameters.AddWithValue("$fid", factionId);
+					goldCmd.ExecuteNonQuery();
+
+					// Update Officer
+					var updCmd = conn.CreateCommand();
+					updCmd.CommandText = @"
+						UPDATE officers 
+						SET main_troop_type = $mtt, officer_type = $mtt, troop_tier = $tier, troop_variant = $var 
+						WHERE officer_id = $oid";
+					updCmd.Parameters.AddWithValue("$mtt", (int)type + 1);
+					updCmd.Parameters.AddWithValue("$tier", tier);
+					updCmd.Parameters.AddWithValue("$var", data.Variant);
+					updCmd.Parameters.AddWithValue("$oid", officerId);
+					updCmd.ExecuteNonQuery();
+
+					trans.Commit();
+					GD.Print($"[ActionManager] Officer {officerId} outfitted with {data.Variant} (Tier {tier}). Cost: {cost}g");
+					return true;
+				}
+				catch (Exception ex)
+				{
+					GD.PrintErr($"[ActionManager] Outfitting Transaction Error: {ex.Message}");
+					trans.Rollback();
+					return false;
+				}
+			}
+		}
+	}
+
 	public void EndDay()
 	{
 		using (var conn = DatabaseHelper.GetConnection())
@@ -725,15 +809,47 @@ public partial class ActionManager : Node
 		using (var conn = DatabaseHelper.GetConnection())
 		{
 			conn.Open();
-			// Get current AP
+			// Get current AP, Troops, Tier, Faction
 			var checkCmd = conn.CreateCommand();
-			checkCmd.CommandText = "SELECT current_action_points FROM officers WHERE officer_id = $pid";
+			checkCmd.CommandText = "SELECT current_action_points, troops, troop_tier, faction_id, gold FROM officers WHERE officer_id = $pid";
 			checkCmd.Parameters.AddWithValue("$pid", playerId);
-			long ap = (long)checkCmd.ExecuteScalar();
+
+			long ap = 0;
+			int troopCount = 0, tier = 1, factionId = 0, pGold = 0;
+
+			using (var r = checkCmd.ExecuteReader())
+			{
+				if (r.Read())
+				{
+					ap = r.GetInt64(0);
+					troopCount = r.GetInt32(1);
+					tier = r.GetInt32(2);
+					factionId = r.IsDBNull(3) ? 0 : r.GetInt32(3);
+					pGold = r.GetInt32(4);
+				}
+			}
 
 			if (ap <= 0)
 			{
 				GD.Print("No AP to travel!");
+				return;
+			}
+
+			// Organization Fee: paid upfront for the march
+			// Scale: (Troops / 10) * Tier
+			int organizationFee = (int)((troopCount / 10f) * tier);
+
+			if (factionId > 0)
+			{
+				var facGoldCmd = conn.CreateCommand();
+				facGoldCmd.CommandText = "SELECT gold_treasury FROM factions WHERE faction_id = $fid";
+				facGoldCmd.Parameters.AddWithValue("$fid", factionId);
+				long treasury = Convert.ToInt64(facGoldCmd.ExecuteScalar());
+				if (treasury < organizationFee) { GD.Print($"Faction treasury too low for organization fee ({organizationFee} required)!"); return; }
+			}
+			else if (pGold < organizationFee)
+			{
+				GD.Print($"Not enough personal gold for organization fee ({organizationFee} required)!");
 				return;
 			}
 
@@ -759,19 +875,19 @@ public partial class ActionManager : Node
 			{
 				try
 				{
-					// Update AP
-					var apCmd = conn.CreateCommand();
-					apCmd.CommandText = "UPDATE officers SET current_action_points = $ap WHERE officer_id = $pid";
-					apCmd.Parameters.AddWithValue("$ap", ap);
-					apCmd.Parameters.AddWithValue("$pid", playerId);
-					apCmd.ExecuteNonQuery();
+					// Update AP and Location
+					var updateCmd = conn.CreateCommand();
+					updateCmd.CommandText = "UPDATE officers SET current_action_points = $ap, location_id = $loc WHERE officer_id = $pid";
+					updateCmd.Parameters.AddWithValue("$ap", ap);
+					updateCmd.Parameters.AddWithValue("$loc", finalLocation);
+					updateCmd.Parameters.AddWithValue("$pid", playerId);
+					updateCmd.ExecuteNonQuery();
 
-					// Update Location
-					var locCmd = conn.CreateCommand();
-					locCmd.CommandText = "UPDATE officers SET location_id = $loc WHERE officer_id = $pid";
-					locCmd.Parameters.AddWithValue("$loc", finalLocation);
-					locCmd.Parameters.AddWithValue("$pid", playerId);
-					locCmd.ExecuteNonQuery();
+					// Deduct Organization Fee
+					if (factionId > 0)
+						ExecuteSql(conn, $"UPDATE factions SET gold_treasury = gold_treasury - {organizationFee} WHERE faction_id = {factionId}");
+					else
+						ExecuteSql(conn, $"UPDATE officers SET gold = gold - {organizationFee} WHERE officer_id = {playerId}");
 
 					// Update Destination (Persistence)
 					var destCmd = conn.CreateCommand();
@@ -993,7 +1109,7 @@ public partial class ActionManager : Node
 	}
 
 	// --- City Management ---
-	public enum DomesticType { Commerce, Agriculture, Defense, PublicOrder, Technology }
+	public enum DomesticType { Commerce, Agriculture, Defense, PublicOrder, Technology, Security, Stability }
 
 	public void PerformDomesticAction(int officerId, int cityId, DomesticType type)
 	{
@@ -1007,7 +1123,7 @@ public partial class ActionManager : Node
 			var cmd = conn.CreateCommand();
 			cmd.CommandText = @"
 				SELECT name, leadership, intelligence, strength, politics, charisma, rank, faction_id, gold, 
-				       farming, business, inventing, fortification, security 
+				       farming, business, inventing, fortification, security, governance, public_attitude
 				FROM officers WHERE officer_id = $oid";
 			cmd.Parameters.AddWithValue("$oid", officerId);
 
@@ -1016,6 +1132,7 @@ public partial class ActionManager : Node
 			long factionId = 0;
 			int officerGold = 0;
 			Dictionary<string, int> skills = new Dictionary<string, int>();
+			int publicAttitude = 0;
 			bool isPlayer = false;
 
 			using (var r = cmd.ExecuteReader())
@@ -1036,6 +1153,8 @@ public partial class ActionManager : Node
 					skills["inventing"] = r.GetInt32(11);
 					skills["fortification"] = r.GetInt32(12);
 					skills["security"] = r.GetInt32(13);
+					skills["governance"] = r.IsDBNull(14) ? 0 : r.GetInt32(14);
+					publicAttitude = r.IsDBNull(15) ? 0 : r.GetInt32(15);
 				}
 			}
 
@@ -1057,7 +1176,7 @@ public partial class ActionManager : Node
 				case DomesticType.Commerce:
 					statValue = pol;
 					targetColumn = "commerce";
-					actionName = "Develop Commerce";
+					actionName = "Develop Business";
 					influencingSkill = "business";
 					statColName = "politics";
 					break;
@@ -1088,6 +1207,20 @@ public partial class ActionManager : Node
 					actionName = "Research";
 					influencingSkill = "inventing";
 					statColName = "intelligence";
+					break;
+				case DomesticType.Stability:
+					statValue = pol;
+					targetColumn = "public_order"; // Unified to Public Order
+					actionName = "Stabilize";
+					influencingSkill = "governance";
+					statColName = "politics";
+					break;
+				case DomesticType.Security:
+					statValue = str;
+					targetColumn = "public_order"; // Unified to Public Order
+					actionName = "Secure Territory";
+					influencingSkill = "security";
+					statColName = "strength";
 					break;
 			}
 
@@ -1159,9 +1292,22 @@ public partial class ActionManager : Node
 			}
 
 			// 5. Calculate Gain
-			// Formula: (Stat/2) + (Skill/5) + Random(5-15)
+			// Formula: (Stat/2) + (Skill/5) + PublicAttitudeBonus + LinkingBonus + Random(5-15)
 			int skillValue = skills.ContainsKey(influencingSkill) ? skills[influencingSkill] : 0;
-			int gain = (int)(statValue * 0.5f) + (int)(skillValue * 0.2f) + new Random().Next(5, 16);
+
+			// Public Attitude Bonus (Inquire influence)
+			float attitudeBonus = publicAttitude * 0.1f;
+
+			// Linking Bonus: Other officers on the same mission in the same city
+			int linkingBonuses = 0;
+			var linkCmd = conn.CreateCommand();
+			linkCmd.CommandText = "SELECT COUNT(*) FROM officers WHERE location_id = $cid AND current_mission = $miss AND officer_id != $me";
+			linkCmd.Parameters.AddWithValue("$cid", cityId);
+			linkCmd.Parameters.AddWithValue("$miss", type.ToString()); // This assumes mission string matches enum name
+			linkCmd.Parameters.AddWithValue("$me", officerId);
+			linkingBonuses = Convert.ToInt32(linkCmd.ExecuteScalar());
+
+			int gain = (int)(statValue * 0.5f) + (int)(skillValue * 0.2f) + (int)attitudeBonus + (linkingBonuses * 5) + new Random().Next(5, 16);
 
 			string updateCitySql = $"UPDATE cities SET {targetColumn} = MIN({cap}, {targetColumn} + {gain}) WHERE city_id = {cityId}";
 
@@ -1608,10 +1754,11 @@ public partial class ActionManager : Node
 			int locId = 0, tech = 0, factionGold = 0;
 			string name = "";
 
+			int faction_id = 0;
 			using (var cmd = conn.CreateCommand())
 			{
 				cmd.CommandText = @"
-					SELECT o.location_id, c.technology, o.name, f.gold
+					SELECT o.location_id, c.technology, o.name, f.gold_treasury, o.faction_id
 					FROM officers o
 					JOIN cities c ON o.location_id = c.city_id
 					LEFT JOIN factions f ON o.faction_id = f.faction_id
@@ -1626,6 +1773,7 @@ public partial class ActionManager : Node
 						tech = r.GetInt32(1);
 						name = r.GetString(2);
 						factionGold = r.IsDBNull(3) ? 0 : r.GetInt32(3);
+						faction_id = r.IsDBNull(4) ? 0 : r.GetInt32(4);
 					}
 				}
 			}
@@ -1670,15 +1818,52 @@ public partial class ActionManager : Node
 
 			if (targetUnitId == 0) { GD.Print("No units available for this role!"); return; }
 
-			// 3. Recruit (Costs 1 AP + Gold)
-			// For now, let's say it fills up to Max Troops
-			if (factionGold < 200) { GD.Print("Faction does not have enough Gold (Need 200)!"); return; }
+			// 3. Recruit (Costs 1 AP + Gold + PO Penalty)
+			// Rule: 1 Gold per 5 soldiers is NOT used for base recruitment anymore.
+			// Conscription costs Gold and significantly lowers Public Order.
+			int conscriptionCost = 500;
+			int poPenalty = 15;
 
-			ExecuteSql(conn, $"UPDATE officers SET unit_type_id = {targetUnitId}, troops = max_troops, current_action_points = current_action_points - 1, reputation = reputation + 5 WHERE officer_id = {officerId}");
-			ExecuteSql(conn, $"UPDATE factions SET gold = gold - 200 WHERE faction_id = (SELECT faction_id FROM officers WHERE officer_id = {officerId})");
+			var cityPO = 0;
+			using (var poCmd = conn.CreateCommand())
+			{
+				poCmd.CommandText = "SELECT public_order FROM cities WHERE city_id = $cid";
+				poCmd.Parameters.AddWithValue("$cid", locId);
+				cityPO = Convert.ToInt32(poCmd.ExecuteScalar());
+			}
 
-			GD.Print($"{name} recruited {unitName} for their squad. Faction Gold -200.");
-			EmitSignal(nameof(ActionPointsChanged));
+			if (cityPO < 20) { GD.Print("Cannot conscript during a Public Revolt!"); return; }
+			if (faction_id > 0)
+			{
+				// Check faction treasury
+				var goldCmd = conn.CreateCommand();
+				goldCmd.CommandText = "SELECT gold_treasury FROM factions WHERE faction_id = $fid";
+				goldCmd.Parameters.AddWithValue("$fid", faction_id);
+				long treasury = Convert.ToInt64(goldCmd.ExecuteScalar());
+				if (treasury < conscriptionCost) { GD.Print("Faction does not have enough Gold!"); return; }
+			}
+
+			using (var trans = conn.BeginTransaction())
+			{
+				try
+				{
+					ExecuteSql(conn, $"UPDATE officers SET unit_type_id = {targetUnitId}, troops = max_troops, current_action_points = current_action_points - 1, reputation = reputation + 5 WHERE officer_id = {officerId}");
+
+					if (faction_id > 0)
+						ExecuteSql(conn, $"UPDATE factions SET gold_treasury = gold_treasury - {conscriptionCost} WHERE faction_id = {faction_id}");
+
+					ExecuteSql(conn, $"UPDATE cities SET public_order = MAX(0, public_order - {poPenalty}) WHERE city_id = {locId}");
+
+					trans.Commit();
+					GD.Print($"{name} conscripted {unitName}. Costs: {conscriptionCost} Gold, -{poPenalty} Public Order.");
+					EmitSignal(nameof(ActionPointsChanged));
+				}
+				catch (Exception ex)
+				{
+					trans.Rollback();
+					GD.PrintErr($"Recruitment Failed: {ex.Message}");
+				}
+			}
 		}
 	}
 
@@ -1782,42 +1967,7 @@ public partial class ActionManager : Node
 		}
 	}
 
-	public void PerformDomesticAction(int officerId, int cityId, string actionName, string updateSql, string gain)
-	{
-		if (!HasActionPoints(officerId)) { GD.Print("Not enough AP!"); return; }
 
-		using (var conn = DatabaseHelper.GetConnection())
-		{
-			conn.Open();
-
-			string name = "";
-			using (var cmd = conn.CreateCommand())
-			{
-				cmd.CommandText = "SELECT name FROM officers WHERE officer_id = $oid";
-				cmd.Parameters.AddWithValue("$oid", officerId);
-				name = (string)cmd.ExecuteScalar();
-			}
-
-			using (var trans = conn.BeginTransaction())
-			{
-				try
-				{
-					ExecuteSql(conn, updateSql);
-					ExecuteSql(conn, $"UPDATE officers SET reputation = reputation + 8, current_action_points = current_action_points - 1 WHERE officer_id = {officerId}");
-
-					trans.Commit();
-					GD.Print($"{name} performed {actionName} in {cityId}! Gained {gain} and +8 Reputation.");
-					CheckPromotions(officerId, conn);
-					EmitSignal(nameof(ActionPointsChanged));
-				}
-				catch (Exception ex)
-				{
-					trans.Rollback();
-					GD.PrintErr($"Domestic Action Failed: {ex.Message}");
-				}
-			}
-		}
-	}
 
 	public void PerformMove(int officerId, int targetCityId)
 	{
@@ -1844,9 +1994,58 @@ public partial class ActionManager : Node
 				return;
 			}
 
-			// 2. Execute Move
-			ExecuteSql(conn, $"UPDATE officers SET location_id = {targetCityId}, current_action_points = current_action_points - 1 WHERE officer_id = {officerId}");
-			GD.Print($"[ActionManager] Officer {officerId} moved to City {targetCityId}");
+			// 1.5 Fetch Stats for Fee
+			var checkCmd = conn.CreateCommand();
+			checkCmd.CommandText = "SELECT troops, troop_tier, faction_id, gold FROM officers WHERE officer_id = $oid";
+			checkCmd.Parameters.AddWithValue("$oid", officerId);
+			int troopCount = 0, tier = 1, factionId = 0, pGold = 0;
+			using (var r = checkCmd.ExecuteReader())
+			{
+				if (r.Read())
+				{
+					troopCount = r.GetInt32(0);
+					tier = r.GetInt32(1);
+					factionId = r.IsDBNull(2) ? 0 : r.GetInt32(2);
+					pGold = r.GetInt32(3);
+				}
+			}
+			int organizationFee = (int)((troopCount / 10f) * tier);
+
+			if (factionId > 0)
+			{
+				var facGoldCmd = conn.CreateCommand();
+				facGoldCmd.CommandText = "SELECT gold_treasury FROM factions WHERE faction_id = $fid";
+				facGoldCmd.Parameters.AddWithValue("$fid", factionId);
+				long treasury = Convert.ToInt64(facGoldCmd.ExecuteScalar());
+				if (treasury < organizationFee) { GD.Print($"[ActionManager] Faction treasury too low for organization fee ({organizationFee})!"); return; }
+			}
+			else if (pGold < organizationFee)
+			{
+				GD.Print($"[ActionManager] Not enough personal gold for organization fee ({organizationFee})!");
+				return;
+			}
+
+			// 2. Execute Move with Fee Deduction
+			using (var trans = conn.BeginTransaction())
+			{
+				try
+				{
+					ExecuteSql(conn, $"UPDATE officers SET location_id = {targetCityId}, current_action_points = current_action_points - 1 WHERE officer_id = {officerId}");
+
+					if (factionId > 0)
+						ExecuteSql(conn, $"UPDATE factions SET gold_treasury = gold_treasury - {organizationFee} WHERE faction_id = {factionId}");
+					else
+						ExecuteSql(conn, $"UPDATE officers SET gold = gold - {organizationFee} WHERE officer_id = {officerId}");
+
+					trans.Commit();
+					GD.Print($"[ActionManager] Officer {officerId} moved to City {targetCityId}. Fee paid: {organizationFee}");
+				}
+				catch (Exception ex)
+				{
+					trans.Rollback();
+					GD.PrintErr($"Move Failed: {ex.Message}");
+				}
+			}
 
 			EmitSignal(nameof(ActionPointsChanged));
 		}
@@ -1986,6 +2185,12 @@ public partial class ActionManager : Node
 
 	private void PerformWorkMission(int officerId, int cityId, string mission)
 	{
+		if (mission == "Inquire")
+		{
+			PerformInquireAction(officerId, cityId);
+			return;
+		}
+
 		DomesticType type;
 		switch (mission)
 		{
@@ -1994,6 +2199,8 @@ public partial class ActionManager : Node
 			case "Science": type = DomesticType.Technology; break;
 			case "Defense": type = DomesticType.Defense; break;
 			case "Order": type = DomesticType.PublicOrder; break;
+			case "Security": type = DomesticType.Security; break;
+			case "Stability": type = DomesticType.Stability; break;
 			default: return;
 		}
 
@@ -2008,5 +2215,37 @@ public partial class ActionManager : Node
 		cmd.Parameters.AddWithValue("$me", excludeId);
 		var res = cmd.ExecuteScalar();
 		return res != null ? Convert.ToInt32(res) : 0;
+	}
+
+	public void PerformInquireAction(int officerId, int cityId)
+	{
+		if (!HasActionPoints(officerId)) { GD.Print("Not enough AP!"); return; }
+
+		using (var conn = DatabaseHelper.GetConnection())
+		{
+			conn.Open();
+			var cmd = conn.CreateCommand();
+			cmd.CommandText = "SELECT charisma FROM officers WHERE officer_id = $oid";
+			cmd.Parameters.AddWithValue("$oid", officerId);
+			int cha = Convert.ToInt32(cmd.ExecuteScalar());
+
+			int gain = (cha / 10) + new Random().Next(5, 15);
+
+			using (var trans = conn.BeginTransaction())
+			{
+				try
+				{
+					ExecuteSql(conn, $"UPDATE officers SET public_attitude = public_attitude + {gain}, current_action_points = current_action_points - 1 WHERE officer_id = {officerId}");
+					trans.Commit();
+					GD.Print($"[Inquire] Officer {officerId} improved Public Attitude by {gain}.");
+					EmitSignal(nameof(ActionPointsChanged));
+				}
+				catch (Exception ex)
+				{
+					trans.Rollback();
+					GD.PrintErr($"Inquire Failed: {ex.Message}");
+				}
+			}
+		}
 	}
 }

@@ -20,6 +20,9 @@ public partial class BattleGauge : Control
     private Label _leftCountLabel;
     private Label _rightCountLabel;
 
+    private Control _leftSupplyBar;
+    private Control _rightSupplyBar;
+
     private Tween _gaugeTween;
     private float _currentRatio = 0.5f;
 
@@ -43,6 +46,9 @@ public partial class BattleGauge : Control
             if (i < lContainer.GetChildCount()) _leftMoraleBars[i] = lContainer.GetChild(i) as Control;
             if (i < rContainer.GetChildCount()) _rightMoraleBars[i] = rContainer.GetChild(i) as Control;
         }
+
+        _leftSupplyBar = GetNodeOrNull<Control>("%LeftSupplyBar");
+        _rightSupplyBar = GetNodeOrNull<Control>("%RightSupplyBar");
 
         UpdateVisuals(0.5f);
     }
@@ -76,6 +82,15 @@ public partial class BattleGauge : Control
 
         UpdateMoraleBars(_leftMoraleBars, lBars);
         UpdateMoraleBars(_rightMoraleBars, rBars);
+    }
+
+    public void UpdateSupplies(float leftSup, float rightSup, float leftMax, float rightMax)
+    {
+        if (_leftSupplyBar != null && leftMax > 0)
+            _leftSupplyBar.AnchorRight = leftSup / leftMax;
+
+        if (_rightSupplyBar != null && rightMax > 0)
+            _rightSupplyBar.AnchorLeft = 1.0f - (rightSup / rightMax);
     }
 
     private void UpdateVisuals(float leftRatio)

@@ -100,6 +100,15 @@ public partial class BattleManager : Node
 						CurrentContext.LeaderId = reader.GetInt32(0);
 						CurrentContext.AttackerFactionId = reader.IsDBNull(1) ? 0 : reader.GetInt32(1);
 						GD.Print($"[BattleManager] Attack Identified: Leader={CurrentContext.LeaderId}, Faction={CurrentContext.AttackerFactionId}");
+
+						// Fetch Attacker Supplies
+						reader.Close();
+						var supCmd = conn.CreateCommand();
+						supCmd.CommandText = "SELECT supplies FROM factions WHERE faction_id = $fid";
+						supCmd.Parameters.AddWithValue("$fid", CurrentContext.AttackerFactionId);
+						var supRes = supCmd.ExecuteScalar();
+						CurrentContext.AttackerSupplies = (supRes != null && supRes != DBNull.Value) ? Convert.ToSingle(supRes) : 1000f;
+						CurrentContext.MaxAttackerSupplies = CurrentContext.AttackerSupplies;
 					}
 				}
 			}
@@ -129,7 +138,11 @@ public partial class BattleManager : Node
 		{
 			conn.Open();
 			var cmd = conn.CreateCommand();
-			cmd.CommandText = "SELECT name, faction_id, defense_level FROM cities WHERE city_id = $cid";
+			cmd.CommandText = @"
+                SELECT c.name, c.faction_id, c.defense_level, f.supplies 
+                FROM cities c
+                LEFT JOIN factions f ON c.faction_id = f.faction_id
+				WHERE c.city_id = $cid";
 			cmd.Parameters.AddWithValue("$cid", cityId);
 			using (var reader = cmd.ExecuteReader())
 			{
@@ -140,6 +153,8 @@ public partial class BattleManager : Node
 					else CurrentContext.OwnerFactionId = 0; // Neutral
 
 					CurrentContext.CityDefense = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
+					CurrentContext.DefenderSupplies = reader.IsDBNull(3) ? 1000 : reader.GetFloat(3);
+					CurrentContext.MaxDefenderSupplies = CurrentContext.DefenderSupplies;
 				}
 			}
 		}
@@ -156,7 +171,7 @@ public partial class BattleManager : Node
 			var cmd = conn.CreateCommand();
 			// Get Name, ID, Faction, Stats
 			cmd.CommandText = @"
-			SELECT officer_id, name, faction_id, leadership, intelligence, strength, charisma, is_player, rank, troops, formation_type, politics, main_troop_type, officer_type
+			SELECT officer_id, name, faction_id, leadership, intelligence, strength, charisma, is_player, rank, troops, formation_type, politics, main_troop_type, officer_type, troop_tier, troop_variant
 				FROM officers 
 				WHERE location_id = $cid";
 			cmd.Parameters.AddWithValue("$cid", cityId);
@@ -177,7 +192,9 @@ public partial class BattleManager : Node
 						Politics = reader.IsDBNull(11) ? 50 : reader.GetInt32(11),
 						IsPlayer = reader.GetBoolean(7),
 						Rank = reader.GetString(8),
-						Troops = reader.IsDBNull(9) ? 0 : reader.GetInt32(9)
+						Troops = reader.IsDBNull(9) ? 0 : reader.GetInt32(9),
+						TroopTier = reader.IsDBNull(14) ? 1 : reader.GetInt32(14),
+						TroopVariant = reader.IsDBNull(15) ? "Standard" : reader.GetString(15)
 					};
 					bo.MaxTroops = GetMaxTroops(bo.Rank);
 
@@ -666,6 +683,20 @@ public partial class BattleManager : Node
 		turnMgr?.ResumeConflictResolution(finishedCityId);
 	}
 
+	public string GetFactionName(int factionId)
+	{
+		if (factionId <= 0) return "Free Officer";
+		using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+		{
+			conn.Open();
+			var cmd = conn.CreateCommand();
+			cmd.CommandText = "SELECT name FROM factions WHERE faction_id = $fid";
+			cmd.Parameters.AddWithValue("$fid", factionId);
+			var res = cmd.ExecuteScalar();
+			return res != null ? res.ToString() : "Unknown Faction";
+		}
+	}
+
 	// AI Autoresolve
 	public void SimulateBattle(int primaryAttackerId, int cityId)
 	{
@@ -1010,24 +1041,50 @@ public partial class BattleManager : Node
 		HandlePostBattleConsequences(factionId, cityId, winnerFactionId);
 	}
 
-	public string GetFactionName(int factionId)
+	public void ProcessSupplyConsumption()
 	{
-		if (factionId <= 0) return "Neutral";
+		if (CurrentContext == null) return;
 
-		using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+		float attackerUsage = 0;
+		foreach (var bo in CurrentContext.AttackerOfficers)
 		{
-			conn.Open();
-			var cmd = conn.CreateCommand();
-			cmd.CommandText = "SELECT name FROM factions WHERE faction_id = $id";
-			cmd.Parameters.AddWithValue("$id", factionId);
-			var result = cmd.ExecuteScalar();
+			attackerUsage += TroopDataManager.GetDailyConsumption(bo.Troops, bo.MainTroopType, bo.TroopTier);
+		}
 
-			if (result != null && result != DBNull.Value)
+		float defenderUsage = 0;
+		foreach (var bo in CurrentContext.DefenderOfficers)
+		{
+			defenderUsage += TroopDataManager.GetDailyConsumption(bo.Troops, bo.MainTroopType, bo.TroopTier);
+		}
+
+		CurrentContext.AttackerSupplies -= attackerUsage;
+		CurrentContext.DefenderSupplies -= defenderUsage;
+
+		if (CurrentContext.AttackerSupplies < 0) CurrentContext.AttackerSupplies = 0;
+		if (CurrentContext.DefenderSupplies < 0) CurrentContext.DefenderSupplies = 0;
+
+		GD.Print($"[Supplies] Turn Consumption - Attacker: {attackerUsage:F1} (Rem: {CurrentContext.AttackerSupplies:F1}), Defender: {defenderUsage:F1} (Rem: {CurrentContext.DefenderSupplies:F1})");
+
+		ApplySupplyPenalties();
+	}
+
+	private void ApplySupplyPenalties()
+	{
+		if (CurrentContext.AttackerSupplies <= 0)
+		{
+			foreach (var bo in CurrentContext.AttackerOfficers)
 			{
-				return result.ToString();
+				bo.Morale = Mathf.Max(0, bo.Morale - 1); // Slow bleed in real-time
 			}
 		}
-		return $"Faction {factionId}";
+
+		if (CurrentContext.DefenderSupplies <= 0)
+		{
+			foreach (var bo in CurrentContext.DefenderOfficers)
+			{
+				bo.Morale = Mathf.Max(0, bo.Morale - 1);
+			}
+		}
 	}
 }
 
@@ -1050,9 +1107,11 @@ public class BattleContext
 
 	public BattleObjective Objective;
 
-	// Supplies (Mocked for now)
-	public int AttackerSupplies = 100;
-	public int DefenderSupplies = 100;
+	// Supplies
+	public float AttackerSupplies = 1000;
+	public float DefenderSupplies = 1000;
+	public float MaxAttackerSupplies = 1000;
+	public float MaxDefenderSupplies = 1000;
 }
 
 public class BattleOfficer
@@ -1070,6 +1129,8 @@ public class BattleOfficer
 	public int Troops;
 	public int MaxTroops;
 	public TroopType MainTroopType;
+	public int TroopTier;
+	public string TroopVariant;
 	public FormationShape Formation;
 
 	// Real-Time Stats

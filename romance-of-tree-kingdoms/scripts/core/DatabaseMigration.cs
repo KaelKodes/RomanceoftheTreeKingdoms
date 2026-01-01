@@ -404,6 +404,55 @@ public partial class DatabaseMigration
                     ExecuteSql(conn, $"ALTER TABLE officers ADD COLUMN {colDef}");
                 }
             }
+
+            // Migration 15: Troop Tiers and Variety
+            GD.Print("[Migration] Migration 15: Troop Tiers and Variety...");
+            string[] troopCols = {
+                "troop_tier INTEGER DEFAULT 1",
+                "troop_variant TEXT DEFAULT 'Standard'"
+            };
+            foreach (var colDef in troopCols)
+            {
+                string colName = colDef.Split(' ')[0];
+                if (!ColumnExists(conn, "officers", colName))
+                {
+                    ExecuteSql(conn, $"ALTER TABLE officers ADD COLUMN {colDef}");
+                }
+            }
+
+            // Migration 16: System Refactor (Unified PO, Governance, Assignment)
+            GD.Print("[Migration] Migration 16: System Refactor...");
+
+            // Add Governance to officers
+            if (!ColumnExists(conn, "officers", "governance"))
+            {
+                ExecuteSql(conn, "ALTER TABLE officers ADD COLUMN governance INTEGER DEFAULT 0");
+            }
+
+            // Add Public Attitude to officers
+            if (!ColumnExists(conn, "officers", "public_attitude"))
+            {
+                ExecuteSql(conn, "ALTER TABLE officers ADD COLUMN public_attitude INTEGER DEFAULT 0");
+            }
+
+            // Add Max Stats to cities
+            if (!ColumnExists(conn, "cities", "max_stats"))
+            {
+                ExecuteSql(conn, "ALTER TABLE cities ADD COLUMN max_stats INTEGER DEFAULT 1000");
+            }
+
+            // Ensure current_assignment and assignment_target_id exist
+            if (!ColumnExists(conn, "officers", "current_assignment"))
+            {
+                ExecuteSql(conn, "ALTER TABLE officers ADD COLUMN current_assignment TEXT DEFAULT NULL");
+            }
+            if (!ColumnExists(conn, "officers", "assignment_target_id"))
+            {
+                ExecuteSql(conn, "ALTER TABLE officers ADD COLUMN assignment_target_id INTEGER DEFAULT 0");
+            }
+
+            // Sync assignments to missions
+            ExecuteSql(conn, "UPDATE officers SET current_mission = current_assignment WHERE current_mission IS NULL AND current_assignment IS NOT NULL");
         }
     }
 

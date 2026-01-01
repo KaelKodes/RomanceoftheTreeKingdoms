@@ -26,6 +26,11 @@ RoninAI="*res://scripts/logic/RoninAI.cs"
 BattleManager="*res://scripts/logic/BattleManager.cs"
 DatabaseClient="*res://scripts/core/DatabaseClient.cs"
 
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+
 [dotnet]
 
 project/assembly_name="Romance of Tree Kingdoms"

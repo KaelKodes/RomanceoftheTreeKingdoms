@@ -8,6 +8,10 @@ public partial class FactionAI : Node
 {
     public static FactionAI Instance { get; private set; }
 
+    private class AI_City { public int CityId; public string Name; public bool IsHQ; public bool IsFrontline; public int GovernorId; public int Technology; public int Commerce; public int Agriculture; public int PublicOrder; public int MaxStats; }
+    private class AI_Officer { public int OfficerId; public string Name; public int Strength; public int Politics; public int Intelligence; public int Leadership; public bool IsCommander; public bool IsWarrior; public int ActionPoints; public string Assignment; public int AssignmentTarget; public int LocationId; public TroopType MainTroopType; public int TroopTier; }
+    private class AI_Leader { public string Name; public int Intelligence; public int Strength; public int Politics; public int Leadership; public int ActionPoints; public int OfficerId; }
+
     public override void _Ready()
     {
         Instance = this;
@@ -20,7 +24,7 @@ public partial class FactionAI : Node
         // 1. Fetch Cities
         var cities = new List<AI_City>();
         var cityCmd = conn.CreateCommand();
-        cityCmd.CommandText = "SELECT city_id, name, is_hq, governor_id FROM cities WHERE faction_id = $fid";
+        cityCmd.CommandText = "SELECT city_id, name, is_hq, governor_id, technology, commerce, agriculture, public_order, max_stats FROM cities WHERE faction_id = $fid";
         cityCmd.Parameters.AddWithValue("$fid", factionId);
         using (var reader = cityCmd.ExecuteReader())
         {
@@ -31,7 +35,11 @@ public partial class FactionAI : Node
                     CityId = reader.GetInt32(0),
                     Name = reader.GetString(1),
                     IsHQ = reader.GetBoolean(2),
-                    GovernorId = reader.IsDBNull(3) ? 0 : reader.GetInt32(3)
+                    Technology = reader.GetInt32(4),
+                    Commerce = reader.GetInt32(5),
+                    Agriculture = reader.GetInt32(6),
+                    PublicOrder = reader.GetInt32(7),
+                    MaxStats = reader.IsDBNull(8) ? 1000 : reader.GetInt32(8)
                 });
             }
         }
@@ -54,15 +62,15 @@ public partial class FactionAI : Node
         }
 
         // 3. Fetch All Officers of this faction
-        var officers = new List<AI_Officer_Stats>();
+        var officers = new List<AI_Officer>();
         var offCmd = conn.CreateCommand();
-        offCmd.CommandText = "SELECT officer_id, name, strength, politics, intelligence, leadership, is_commander FROM officers WHERE faction_id = $fid AND is_player = 0";
+        offCmd.CommandText = "SELECT officer_id, name, strength, politics, intelligence, leadership, is_commander, current_action_points, location_id, main_troop_type, troop_tier FROM officers WHERE faction_id = $fid AND is_player = 0";
         offCmd.Parameters.AddWithValue("$fid", factionId);
         using (var reader = offCmd.ExecuteReader())
         {
             while (reader.Read())
             {
-                var o = new AI_Officer_Stats
+                var o = new AI_Officer
                 {
                     OfficerId = reader.GetInt32(0),
                     Name = reader.GetString(1),
@@ -70,7 +78,11 @@ public partial class FactionAI : Node
                     Politics = reader.IsDBNull(3) ? 50 : reader.GetInt32(3),
                     Intelligence = reader.IsDBNull(4) ? 50 : reader.GetInt32(4),
                     Leadership = reader.IsDBNull(5) ? 50 : reader.GetInt32(5),
-                    IsCommander = reader.IsDBNull(6) ? false : (reader.GetInt32(6) == 1)
+                    IsCommander = reader.IsDBNull(6) ? false : (reader.GetInt32(6) == 1),
+                    ActionPoints = reader.GetInt32(7),
+                    LocationId = reader.GetInt32(8),
+                    MainTroopType = (TroopType)(reader.IsDBNull(9) ? 0 : reader.GetInt32(9) - 1),
+                    TroopTier = reader.GetInt32(10)
                 };
                 // Categorize: Warriors prefer Strength/Leadership, Bureaucrats prefer Politics/Intelligence
                 o.IsWarrior = (o.Strength + o.Leadership) >= (o.Politics + o.Intelligence);
@@ -80,7 +92,7 @@ public partial class FactionAI : Node
 
         // 4. Redistribution Algorithm
         var assignments = new Dictionary<int, int>(); // OfficerID -> CityID
-        var remainingOfficers = new List<AI_Officer_Stats>(officers);
+        var remainingOfficers = new List<AI_Officer>(officers);
 
         // Step A: Governors must be at their post (Top Priority)
         foreach (var city in cities)
@@ -154,8 +166,211 @@ public partial class FactionAI : Node
         GD.Print($"[Repositioning] Faction {factionId} reorganized {assignments.Count} officers across {cities.Count} cities.");
     }
 
-    private class AI_City { public int CityId; public string Name; public bool IsHQ; public bool IsFrontline; public int GovernorId; }
-    private class AI_Officer_Stats { public int OfficerId; public string Name; public int Strength; public int Politics; public int Intelligence; public int Leadership; public bool IsCommander; public bool IsWarrior; }
+    public void PerformStage1Prep(SqliteConnection conn, int factionId)
+    {
+        GD.Print($"[AI Strategy] Faction {factionId} is in Stage 1: Preparation...");
+
+        // 1. Evaluate Cities and Assign Missions
+        var cities = GetCitiesByFaction(conn, factionId);
+        foreach (var city in cities)
+        {
+            var officers = GetOfficersInCity(conn, city.CityId, factionId);
+            if (officers.Count == 0) continue;
+
+            // Domestic vs Military split
+            foreach (var off in officers)
+            {
+                if (off.IsWarrior)
+                {
+                    // Randomly assign Conscription or Training
+                    string mission = (new Random().NextDouble() > 0.5) ? "Conscription" : "Training";
+                    SetOfficerMission(conn, off.OfficerId, mission);
+                }
+                else
+                {
+                    // Balance Farming, Commerce, Science
+                    string mission = GetBestDomesticMission(city);
+                    SetOfficerMission(conn, off.OfficerId, mission);
+                }
+            }
+        }
+
+        // 2. Troop Outfitting (Upgrading units if tech/gold allows)
+        OutfitOfficersIfPossible(conn, factionId);
+    }
+
+    public void PerformStage2Execution(SqliteConnection conn, int factionId)
+    {
+        GD.Print($"[AI Strategy] Faction {factionId} is in Stage 2: Execution...");
+
+        // 1. Logistics (Redistribute supplies to frontline)
+        ProcessLogistics(conn, factionId);
+
+        // 2. Military Moves (Invasions)
+        ProcessMilitaryMoves(conn, factionId);
+    }
+
+    private void OutfitOfficersIfPossible(SqliteConnection conn, int factionId)
+    {
+        var officers = GetOfficersByFaction(conn, factionId);
+        foreach (var off in officers)
+        {
+            // If Tier 1, try Tier 2. If Tier 2, try Tier 3.
+            int currentTier = off.TroopTier;
+            if (currentTier >= 3) continue;
+
+            int nextTier = currentTier + 1;
+            // ActionManager handles the actual gold/tech checks
+            ActionManager.Instance.PerformTroopOutfitting(off.OfficerId, off.MainTroopType, nextTier);
+        }
+    }
+
+    private List<AI_City> GetCitiesByFaction(SqliteConnection conn, int factionId)
+    {
+        var list = new List<AI_City>();
+        var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT city_id, name, is_hq, governor_id, technology, commerce, agriculture, public_order, max_stats FROM cities WHERE faction_id = $fid";
+        cmd.Parameters.AddWithValue("$fid", factionId);
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read())
+                list.Add(new AI_City
+                {
+                    CityId = r.GetInt32(0),
+                    Name = r.GetString(1),
+                    IsHQ = r.GetBoolean(2),
+                    Technology = r.GetInt32(4),
+                    Commerce = r.GetInt32(5),
+                    Agriculture = r.GetInt32(6),
+                    PublicOrder = r.GetInt32(7),
+                    MaxStats = r.IsDBNull(8) ? 1000 : r.GetInt32(8)
+                });
+        }
+        return list;
+    }
+
+    private List<AI_Officer> GetOfficersInCity(SqliteConnection conn, int cityId, int factionId)
+    {
+        var list = new List<AI_Officer>();
+        var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT officer_id, name, strength, leadership, politics, intelligence, troop_tier, main_troop_type FROM officers WHERE location_id = $cid AND faction_id = $fid";
+        cmd.Parameters.AddWithValue("$cid", cityId);
+        cmd.Parameters.AddWithValue("$fid", factionId);
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read())
+            {
+                var o = new AI_Officer
+                {
+                    OfficerId = r.GetInt32(0),
+                    Name = r.GetString(1),
+                    Strength = r.GetInt32(2),
+                    Leadership = r.GetInt32(3),
+                    Politics = r.GetInt32(4),
+                    Intelligence = r.GetInt32(5),
+                    TroopTier = r.GetInt32(6),
+                    MainTroopType = (TroopType)(r.IsDBNull(7) ? 0 : r.GetInt32(7) - 1)
+                };
+                o.IsWarrior = (o.Strength + o.Leadership) >= (o.Politics + o.Intelligence);
+                list.Add(o);
+            }
+        }
+        return list;
+    }
+
+    private void SetOfficerMission(SqliteConnection conn, int officerId, string mission)
+    {
+        ExecuteSql(conn, $"UPDATE officers SET current_mission = '{mission}', current_assignment = '{mission}' WHERE officer_id = {officerId}");
+    }
+
+    private string GetBestDomesticMission(AI_City city)
+    {
+        int threshold = (int)(city.MaxStats * 0.7f);
+        if (city.PublicOrder < threshold) return "Order";
+
+        if (city.Agriculture < city.Commerce && city.Agriculture < city.Technology) return "Farming";
+        if (city.Commerce < city.Technology) return "Commerce";
+        return "Science";
+    }
+
+    private void ProcessLogistics(SqliteConnection conn, int factionId)
+    {
+        // Simple Logic: Move supplies from deep cities to frontline cities if needed
+        GD.Print($"[AI Logistics] Faction {factionId} redistributing supplies...");
+    }
+
+    private void ProcessMilitaryMoves(SqliteConnection conn, int factionId)
+    {
+        GD.Print($"[AI Military] Faction {factionId} processing marches...");
+    }
+
+    private List<AI_Officer> GetOfficersByFaction(SqliteConnection conn, int factionId)
+    {
+        var list = new List<AI_Officer>();
+        var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT officer_id, name, strength, leadership, politics, intelligence, troop_tier, main_troop_type FROM officers WHERE faction_id = $fid";
+        cmd.Parameters.AddWithValue("$fid", factionId);
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read())
+            {
+                var o = new AI_Officer
+                {
+                    OfficerId = r.GetInt32(0),
+                    Name = r.GetString(1),
+                    Strength = r.GetInt32(2),
+                    Leadership = r.GetInt32(3),
+                    Politics = r.GetInt32(4),
+                    Intelligence = r.GetInt32(5),
+                    TroopTier = r.GetInt32(6),
+                    MainTroopType = (TroopType)(r.IsDBNull(7) ? 0 : r.GetInt32(7) - 1)
+                };
+                o.IsWarrior = (o.Strength + o.Leadership) >= (o.Politics + o.Intelligence);
+                list.Add(o);
+            }
+        }
+        return list;
+    }
+
+    private List<AI_Officer> GetOfficersWithAssignments(SqliteConnection conn, int factionId)
+    {
+        var list = new List<AI_Officer>();
+        var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT officer_id, name, location_id, current_action_points, current_assignment, assignment_target_id FROM officers WHERE faction_id = $fid AND current_assignment IS NOT NULL AND current_action_points > 0";
+        cmd.Parameters.AddWithValue("$fid", factionId);
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read())
+                list.Add(new AI_Officer
+                {
+                    OfficerId = Convert.ToInt32(r.GetValue(0)),
+                    Name = r.IsDBNull(1) ? "Unknown" : r.GetString(1),
+                    LocationId = r.IsDBNull(2) ? 0 : Convert.ToInt32(r.GetValue(2)),
+                    ActionPoints = r.IsDBNull(3) ? 0 : Convert.ToInt32(r.GetValue(3)),
+                    Assignment = r.IsDBNull(4) ? "" : r.GetString(4),
+                    AssignmentTarget = r.IsDBNull(5) ? 0 : Convert.ToInt32(r.GetValue(5))
+                });
+        }
+        return list;
+    }
+
+    private bool IsAdjacent(SqliteConnection conn, int loc1, int loc2)
+    {
+        var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM routes WHERE (start_city_id = $l1 AND end_city_id = $l2) OR (start_city_id = $l2 AND end_city_id = $l1)";
+        cmd.Parameters.AddWithValue("$l1", loc1);
+        cmd.Parameters.AddWithValue("$l2", loc2);
+        return (long)cmd.ExecuteScalar() > 0;
+    }
+
+    private void ExecuteSql(SqliteConnection conn, string sql)
+    {
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = sql;
+            cmd.ExecuteNonQuery();
+        }
+    }
 
     public async void ProcessTurn(int factionId)
     {
@@ -197,7 +412,7 @@ public partial class FactionAI : Node
         }
     }
 
-    private void EnsureGoalsExist(SqliteConnection conn, int factionId)
+    public void EnsureGoalsExist(SqliteConnection conn, int factionId)
     {
         var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT monthly_goal, weekly_task FROM factions WHERE faction_id = $fid";
@@ -370,17 +585,17 @@ public partial class FactionAI : Node
                         am.PerformRest(officer.OfficerId);
                 }
                 break;
-            case "DevelopEconomy":
-                am.PerformDomesticAction(officer.OfficerId, officer.LocationId, ActionManager.DomesticType.Commerce);
-                break;
-            case "Research":
-                am.PerformDomesticAction(officer.OfficerId, officer.LocationId, ActionManager.DomesticType.Technology);
-                break;
             case "Fortify":
-                am.PerformDomesticAction(officer.OfficerId, officer.LocationId, ActionManager.DomesticType.Defense);
-                break;
             case "Cultivate":
-                am.PerformDomesticAction(officer.OfficerId, officer.LocationId, ActionManager.DomesticType.Agriculture);
+            case "Secure":
+            case "Stabilize":
+            case "Order":
+            case "Farming":
+            case "Commerce":
+            case "Science":
+                // Domestic Tasks are now handled EXCLUSIVELY by ActionManager.ProcessOfficerPhase
+                // This prevents the "Double Action" bug. We just leave the AP for later.
+                GD.Print($"[AI] {officer.Name} is assigned to {officer.Assignment}, waiting for Officer Phase.");
                 break;
             case "RecruitOfficer":
                 int roninId = FindRoninInCity(conn, officer.LocationId);
@@ -553,6 +768,19 @@ public partial class FactionAI : Node
         return targetId;
     }
 
+    public List<int> GetCityIdsByFaction(SqliteConnection conn, int factionId)
+    {
+        var ids = new List<int>();
+        var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT city_id FROM cities WHERE faction_id = $fid";
+        cmd.Parameters.AddWithValue("$fid", factionId);
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read()) ids.Add(r.GetInt32(0));
+        }
+        return ids;
+    }
+
     private (string task, int targetId) GetWeeklyTask(SqliteConnection conn, int factionId)
     {
         var cmd = conn.CreateCommand();
@@ -565,48 +793,6 @@ public partial class FactionAI : Node
         return ("DevelopEconomy", 0);
     }
 
-    private List<AI_Officer> GetOfficersWithAssignments(SqliteConnection conn, int factionId)
-    {
-        var list = new List<AI_Officer>();
-        var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT officer_id, name, location_id, current_action_points, current_assignment, assignment_target_id FROM officers WHERE faction_id = $fid AND current_assignment IS NOT NULL AND current_action_points > 0";
-        cmd.Parameters.AddWithValue("$fid", factionId);
-        using (var r = cmd.ExecuteReader())
-        {
-            while (r.Read())
-                list.Add(new AI_Officer
-                {
-                    OfficerId = Convert.ToInt32(r.GetValue(0)),
-                    Name = r.IsDBNull(1) ? "Unknown" : r.GetString(1),
-                    LocationId = r.IsDBNull(2) ? 0 : Convert.ToInt32(r.GetValue(2)),
-                    ActionPoints = r.IsDBNull(3) ? 0 : Convert.ToInt32(r.GetValue(3)),
-                    Assignment = r.IsDBNull(4) ? "" : r.GetString(4),
-                    AssignmentTarget = r.IsDBNull(5) ? 0 : Convert.ToInt32(r.GetValue(5))
-                });
-        }
-        return list;
-    }
-
-    private bool IsAdjacent(SqliteConnection conn, int loc1, int loc2)
-    {
-        var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM routes WHERE (start_city_id = $l1 AND end_city_id = $l2) OR (start_city_id = $l2 AND end_city_id = $l1)";
-        cmd.Parameters.AddWithValue("$l1", loc1);
-        cmd.Parameters.AddWithValue("$l2", loc2);
-        return (long)cmd.ExecuteScalar() > 0;
-    }
-
-    private void ExecuteSql(SqliteConnection conn, string sql)
-    {
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = sql;
-            cmd.ExecuteNonQuery();
-        }
-    }
-
-    private class AI_Leader { public string Name; public int Intelligence; public int Strength; public int Politics; public int Leadership; public int ActionPoints; public int OfficerId; }
-    private class AI_Officer { public int OfficerId; public int LocationId; public string Name; public int ActionPoints; public string Assignment; public int AssignmentTarget; public int Strength; public bool IsCommander; }
 
     private AI_Leader GetFactionLeader(SqliteConnection conn, int factionId)
     {
@@ -781,9 +967,9 @@ public partial class FactionAI : Node
         cityId = Convert.ToInt32(res);
 
         // 2. Get Stats
-        int commerce = 0, agriculture = 0, technology = 0, maxStats = 1000;
+        int commerce = 0, agriculture = 0, technology = 0, security = 0, stability = 0, order = 0, maxStats = 1000;
         var cityCmd = conn.CreateCommand();
-        cityCmd.CommandText = "SELECT commerce, agriculture, technology, max_stats FROM cities WHERE city_id = $cid";
+        cityCmd.CommandText = "SELECT commerce, agriculture, technology, security, stability, public_order, max_stats FROM cities WHERE city_id = $cid";
         cityCmd.Parameters.AddWithValue("$cid", cityId);
         using (var reader = cityCmd.ExecuteReader())
         {
@@ -792,11 +978,18 @@ public partial class FactionAI : Node
                 commerce = reader.GetInt32(0);
                 agriculture = reader.GetInt32(1);
                 technology = reader.GetInt32(2);
-                maxStats = reader.IsDBNull(3) ? 1000 : reader.GetInt32(3);
+                security = reader.GetInt32(3);
+                stability = reader.GetInt32(4);
+                order = reader.GetInt32(5);
+                maxStats = reader.IsDBNull(6) ? 1000 : reader.GetInt32(6);
             }
         }
 
         // 3. Increment Logic (250, 500, 750, 1000)
+        if (order < 60) return "Fortify"; // Order and Security are critical
+        if (security < 50) return "Secure";
+        if (stability < 50) return "Stabilize";
+
         int[] tiers = { 250, 500, 750, maxStats };
         foreach (int tier in tiers)
         {
@@ -808,10 +1001,62 @@ public partial class FactionAI : Node
         return "Recruit"; // Everything maxed? Build army.
     }
 
+    public void PerformPrefectEvaluation(SqliteConnection conn, int cityId)
+    {
+        // 1. Get Governor and Performance Data
+        var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            SELECT governor_id, commerce, agriculture, technology, security, stability, name
+            FROM cities 
+            WHERE city_id = $cid AND governor_id > 0";
+        cmd.Parameters.AddWithValue("$cid", cityId);
+
+        using (var r = cmd.ExecuteReader())
+        {
+            if (r.Read())
+            {
+                int govId = r.GetInt32(0);
+                int com = r.GetInt32(1);
+                int agr = r.GetInt32(2);
+                int tech = r.GetInt32(3);
+                int sec = r.GetInt32(4);
+                int sta = r.GetInt32(5);
+                string cityName = r.GetString(6);
+
+                // Simplified Merit Calculation: 
+                // In a real system, we'd track "Old Stats" vs "New Stats".
+                // For now, let's just award merit based on high averages which implies effort.
+                int meritGain = (com + agr + tech + sec + sta) / 100;
+
+                if (meritGain > 0)
+                {
+                    ExecuteSql(conn, $"UPDATE officers SET merit_score = merit_score + {meritGain} WHERE officer_id = {govId}");
+                    GD.Print($"[AI Evaluation] Prefect of {cityName} (ID: {govId}) awarded {meritGain} Merit for performance.");
+                }
+            }
+        }
+    }
+
+    public void ProcessMonthlyFinances(SqliteConnection conn, int factionId)
+    {
+        GD.Print($"[Finance] Monthly calculation for Faction {factionId}...");
+        // 1. Tax Collection
+        ExecuteSql(conn, @"
+            UPDATE factions 
+            SET gold_treasury = gold_treasury + (SELECT SUM(commerce * tax_rate) FROM cities WHERE faction_id = factions.faction_id)
+            WHERE faction_id = " + factionId);
+
+        // 2. Salaries (Simplified: 10 gold per officer)
+        ExecuteSql(conn, @"
+            UPDATE factions 
+            SET gold_treasury = gold_treasury - (SELECT COUNT(*) * 10 FROM officers WHERE faction_id = factions.faction_id)
+            WHERE faction_id = " + factionId);
+    }
+
     private int GetFactionGold(SqliteConnection conn, int officerId)
     {
         var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT f.gold FROM factions f JOIN officers o ON f.faction_id = o.faction_id WHERE o.officer_id = $oid";
+        cmd.CommandText = "SELECT f.gold_treasury FROM factions f JOIN officers o ON f.faction_id = o.faction_id WHERE o.officer_id = $oid";
         cmd.Parameters.AddWithValue("$oid", officerId);
         var res = cmd.ExecuteScalar();
         return (res != null && res != DBNull.Value) ? Convert.ToInt32(res) : 0;

@@ -40,10 +40,12 @@ layout_mode = 2
 text = "City Name"
 horizontal_alignment = 1
 
-[node name="InfoLabel" type="Label" parent="MarginContainer/VBoxContainer"]
+[node name="InfoLabel" type="RichTextLabel" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
+bbcode_enabled = true
 text = "City Info"
-horizontal_alignment = 1
+fit_content = true
+autowrap_mode = 0
 
 [node name="OfficersHeader" type="Label" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2

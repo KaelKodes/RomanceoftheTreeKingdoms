@@ -25,6 +25,7 @@ public partial class BattleController : Node2D
 	private bool _battleEnded = false;
 	private double _aiTimer = 0;
 	private double _gaugeTimer = 0; // Throttle UI updates
+	private double _supplyTimer = 0;
 
 	private BattleGauge _battleGauge;
 
@@ -83,6 +84,14 @@ public partial class BattleController : Node2D
 			_gaugeTimer = 0;
 		}
 
+		// Supply Cycle (Every 1.0s)
+		_supplyTimer += dt;
+		if (_supplyTimer >= 1.0f)
+		{
+			_battleManager?.ProcessSupplyConsumption();
+			_supplyTimer = 0;
+		}
+
 		CheckWinCondition();
 	}
 
@@ -101,6 +110,12 @@ public partial class BattleController : Node2D
 		float defMorale = defenders.Count > 0 ? (float)defenders.Average(u => u.CurrentMorale) : 0;
 
 		_battleGauge.UpdateStats(attTroops, defTroops, attMorale, defMorale);
+
+		var ctx = _battleManager.CurrentContext;
+		if (ctx != null)
+		{
+			_battleGauge.UpdateSupplies(ctx.AttackerSupplies, ctx.DefenderSupplies, ctx.MaxAttackerSupplies, ctx.MaxDefenderSupplies);
+		}
 	}
 
 	private void UpdateAITargets()
